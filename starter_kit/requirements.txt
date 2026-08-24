@@ -1,0 +1,22 @@
+# ---- LoomQ project dependencies ----
+# The public evaluator runs the auto-scoring suite (evaluator.py / selftest.py)
+# with the Python standard library ONLY -- loomq_core / adapter are pure
+# stdlib and import no third-party package on the scoring paths.
+#
+# Third-party SDKs below are used only by optional runners. Every version is
+# pinned exactly (the evaluation will not pick dependency versions for us).
+# All three are tested on Python 3.10 (cp310 wheels).
+
+# L1 real-machine submission runner (run_real.py) - SpinQ Cloud (spinqit API)
+spinqit==0.2.4
+
+# L1 real-machine submission runner (run_real.py) - OriginQ Wukong cloud (QCloud)
+pyqpanda==3.8.5
+
+# Web UI standard circuit diagram (loomq_web.py /api/circuit) - optional:
+# the UI degrades gracefully to showing the QASM source if qiskit is absent.
+qiskit==2.5.2
+
+# AWS Braket is intentionally NOT pinned: BraketRunner imports
+# amazon-braket-sdk lazily and only when AWS credentials are provided
+# (no credentials are included in this submission).
