@@ -649,6 +649,26 @@ function placeGate(name,qubits,col,param){
   }
   circ.cols=Math.max(circ.cols,col+1);
 }
+function colBlocked(c){
+  // Wires a multi-qubit gate in column c passes THROUGH as an intermediate
+  // wire; another gate must never sit on those cells or the vertical
+  // connector would overlap it (the QFT h-vs-cu1 collision).
+  const blocked=new Set();
+  for(let w=0;w<circ.qubits;w++){
+    const g=circ.grid[w]&&circ.grid[w][c];
+    if(g&&g.name&&g.qubits&&g.qubits.length>1){
+      const lo=Math.min(...g.qubits), hi=Math.max(...g.qubits);
+      for(let x=lo;x<=hi;x++) if(!g.qubits.includes(x)) blocked.add(x);
+    }
+  }
+  return blocked;
+}
+function colSuitable(qs,c){
+  for(const w of qs){ if(circ.grid[w]&&circ.grid[w][c]) return false; }
+  const b=colBlocked(c);
+  for(const w of qs) if(b.has(w)) return false;
+  return true;
+}
 function parseQasmToGrid(){
   const qm=$('qasm-editor').value.match(/qreg\s*q\[\s*(\d+)\s*\]/);
   const n=Math.max(2,qm?parseInt(qm[1],10):2);
@@ -659,7 +679,8 @@ function parseQasmToGrid(){
     const m=line.match(re); if(!m) continue;
     const qs=[parseInt(m[3],10)]; if(m[4]!==undefined) qs.push(parseInt(m[4],10)); if(m[5]!==undefined) qs.push(parseInt(m[5],10));
     if(Math.max(...qs)>=n) continue;
-    const col=Math.max(...qs.map(q=>last[q]))+1;
+    let col=Math.max(...qs.map(q=>last[q]))+1;
+    while(!colSuitable(qs,col)) col++;
     placeGate(m[1],qs,col,parseParam(m[2]));
     for(const q of qs) last[q]=col;
   }
@@ -748,7 +769,9 @@ function pickControl(w){
   if(pm.sel.includes(w)){ pm.sel=pm.sel.filter(x=>x!==w); renderGrid(); return; }
   pm.sel.push(w);
   if(pm.sel.length>=pm.q-1){
-    placeGate(pm.name,[...pm.sel,pm.tw],pm.c,pm.param);
+    const qs=[...pm.sel,pm.tw];
+    while(!colSuitable(qs,pm.c)) pm.c++; // keep the connector from crossing other gates
+    placeGate(pm.name,qs,pm.c,pm.param);
     pendingMulti=null;
     syncToQasm();
   }else renderGrid();
@@ -759,7 +782,7 @@ function syncToQasm(){ $('qasm-editor').value=gridToQasm(); renderGrid(); }
 function placeFromPalette(n,q,p,w,c){
   if(q>1){
     if(circ.qubits<q){ alert('至少需要 '+q+' 根线才能放 '+n.toUpperCase()+'（先用 + 加线，最多 12 根）'); return; }
-    while((circ.grid[w]&&circ.grid[w][c])) c++;
+    while(!colSuitable([w],c)) c++; // drop cell must not be crossed by an existing gate
     const param=p?(prompt('请输入角度（如 pi/2、0.7；留空默认 π/4）')||''):null;
     const angle=parseParam(param);
     // Control-picker: target stays on the dropped wire; the user picks the
@@ -769,7 +792,7 @@ function placeFromPalette(n,q,p,w,c){
     return;
   }
   if(w>=circ.qubits) return;
-  while((circ.grid[w]&&circ.grid[w][c])) c++;
+  while((circ.grid[w]&&circ.grid[w][c])||!colSuitable([w],c)) c++;
   const param=p?(prompt('请输入角度（如 pi/2、0.7；留空默认 π/4）')||''):null;
   const angle=parseParam(param);
   placeGate(n,[w],c,angle==null&&p?Math.PI/4:angle);
