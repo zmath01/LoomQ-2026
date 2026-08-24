@@ -777,7 +777,9 @@ function circView(m){
   circMode=m;
   $('btn-grid').classList.toggle('on',m==='grid');
   $('btn-qiskit').classList.toggle('on',m==='qiskit');
-  if(m==='grid') renderGrid(); else drawCircuitFromEditor();
+  // Re-parse the editor into the grid model so a programmatically loaded
+  // preset (which does not fire the input event) shows immediately.
+  if(m==='grid') syncFromQasm(); else drawCircuitFromEditor();
 }
 function initPalette(){
   $('gate-palette').innerHTML=GATES12.map(g=>{
