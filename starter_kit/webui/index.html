@@ -733,9 +733,14 @@ function renderGrid(){
   });
 }
 function vlink(g){
-  const lo=Math.min(...g.qubits), hi=Math.max(...g.qubits), span=(hi-lo)*46;
-  if(span<=0) return '';
-  return '<div class="vlink" style="height:'+span+'px;'+(g.target===lo?'top:24px':'bottom:24px')+'"></div>';
+  const lo=Math.min(...g.qubits), hi=Math.max(...g.qubits), t=g.target;
+  const up=(t-lo)*46, down=(hi-t)*46;
+  // The target may sit in the MIDDLE of the span (e.g. ccx q[0],q[2],q[1]);
+  // draw the connector as two segments (up + down) so it never overshoots.
+  let html='';
+  if(up>0) html+='<div class="vlink" style="height:'+up+'px;bottom:24px"></div>';
+  if(down>0) html+='<div class="vlink" style="height:'+down+'px;top:24px"></div>';
+  return html;
 }
 function pickControl(w){
   const pm=pendingMulti; if(!pm) return;
