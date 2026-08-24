@@ -147,8 +147,8 @@
   .bar.rest .rect{background:#C3CFE0}
   .bar .lbl{font-size:11px;margin-top:4px;font-family:ui-monospace,Consolas,monospace;white-space:nowrap;color:var(--sub)}
   .bar.best .lbl{font-weight:800;color:var(--ink)}
-  .hist-tip{position:fixed;background:#0B1220;color:#fff;font-size:12px;padding:4px 9px;border-radius:6px;
-    pointer-events:none;display:none;z-index:99;white-space:nowrap;font-family:ui-monospace,monospace}
+  .hist-readout{min-height:22px;font-family:ui-monospace,monospace;font-size:12px;color:var(--acc);margin-bottom:4px;
+    background:var(--acc-soft);border-radius:6px;padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .legend{margin-top:8px;font-size:12px;color:var(--sub)}
   .legend .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin:0 6px 0 12px;vertical-align:-1px}
 
@@ -336,8 +336,8 @@
             <button class="btn" id="run-btn" onclick="runLab()">▶ 运行</button>
           </div>
           <div class="muted" style="margin-bottom:4px">📊 直方图（悬停柱子看概率）：</div>
+          <div class="hist-readout" id="hist-readout">（悬停柱子查看概率）</div>
           <div id="hist-area"><span class="muted">（运行后显示）</span></div>
-          <div id="hist-tip"></div>
           <div id="lab-result" style="display:none">
             <div class="legend" style="margin-top:8px"><span class="dot" style="background:#1976D2"></span>结果
               <span class="dot" style="background:#0B1220"></span>主导态
@@ -874,11 +874,11 @@ function renderHistogram(d){
   html+='</div>';
   html+='<div class="muted" style="margin-top:6px">共 '+total+' 次采样 · 悬停柱子看概率 · 前 '+Math.min(maxKeys,allCount)+(rest!==null?' + 其余':'')+'（Qiskit number_to_keep）</div>';
   $('hist-area').innerHTML=html;
-  const tip=$('hist-tip');
+  // Probability readout in a fixed slot ABOVE the chart (no layout movement).
+  const ro=$('hist-readout');
   document.querySelectorAll('#hist-area .bar').forEach(b=>{
-    b.addEventListener('mouseenter',()=>{tip.textContent=b.dataset.tip;tip.style.display='block';});
-    b.addEventListener('mousemove',e=>{tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-10)+'px';});
-    b.addEventListener('mouseleave',()=>{tip.style.display='none';});
+    b.addEventListener('mouseenter',()=>{ro.textContent=b.dataset.tip;});
+    b.addEventListener('mouseleave',()=>{ro.textContent='（悬停柱子查看概率）';});
   });
 }
 
