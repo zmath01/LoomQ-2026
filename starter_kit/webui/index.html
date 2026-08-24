@@ -125,6 +125,8 @@
     font-weight:700;z-index:1;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
   .pick-ctl.sel{background:var(--acc);color:#fff}
   .cell.pick-t{background:var(--acc-soft)}
+  .rh-item{border:1px solid var(--line);border-radius:8px;padding:5px 9px;background:#fff;cursor:pointer;font-size:12px;transition:.12s}
+  .rh-item:hover{border-color:var(--acc);box-shadow:var(--shadow)}
 
   /* ---------- circuit library knowledge ---------- */
   .bloch-wrap{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
@@ -324,6 +326,7 @@
             <button class="chip sel" id="tg-spinq" onclick="pickTarget('spinq')">量旋</button>
             <button class="chip" id="tg-originq" onclick="pickTarget('originq')">本源</button>
             <button class="chip" id="tg-braket" onclick="pickTarget('braket')">Braket</button>
+            <button class="chip" id="tg-all" onclick="pickTarget('all')">全部</button>
           </div>
           <div class="row" style="margin-bottom:10px">
             <span class="muted">采样</span>
@@ -346,6 +349,8 @@
               <p id="res-expl" style="margin:6px 0 0;font-size:13px;color:#0D47A1"></p>
             </div>
           </div>
+          <div class="muted" style="margin-top:14px;margin-bottom:4px">📋 运行记录（点击恢复查看，最多 20 条）：</div>
+          <div id="run-history" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto"></div>
         </div>
       </div>
 
@@ -459,6 +464,7 @@ async function init(){
     $('llm-status').textContent=h.llm_configured?'✅ 已配置（LOOMQ_LLM_*） — 直接在下面发问即可。':'⚠ 未配置 — 在上面填入 Base URL、Model、API Key 并点保存（只存于服务端内存，重启需重新输入）。';
     loadPreset('bell');
     loadBackends(); renderAlgos(); renderGateKnowledge(); initPalette(); initBloch();
+    renderRunHistory();
     const params=new URLSearchParams(location.search);
     const autoRun=params.has('run');
     if(autoRun){showTab('lab');const rk=params.get('run');if(PRESETS[rk])loadPreset(rk);else loadPreset('bell');if(!params.has('diag')&&!window.__LOOMQ_DIAG)setTimeout(runLab,400);}else if(location.hash&&['start','chat','lab','algos','backends'].includes(location.hash.slice(1))){
@@ -678,7 +684,7 @@ function renderGrid(){
       const g=circ.grid[w]&&circ.grid[w][c];
       let inner='';
       if(pm&&w!==pm.tw&&c===pm.c&&!g){
-        inner='<div class="pick-ctl'+(pm.sel.includes(w)?' sel':'')+'" data-pick="'+w+'">●</div>';
+        inner='<div class="pick-ctl'+(pm.sel.includes(w)?' sel':'')+'" data-pick="'+w+'">+</div>';
       }else if(pm&&w===pm.tw&&c===pm.c){
         inner='<div class="gtgt dim">⊕</div>';
       }else if(g&&g.name){
@@ -686,11 +692,11 @@ function renderGrid(){
           inner='<div class="gchip" data-w="'+w+'" data-c="'+c+'" title="点击删除">'+escapeHtml(g.name.toUpperCase()+(g.param!=null?'('+fmtParam(g.param)+')':''))+'</div>';
         }else{
           const isTarget=w===g.target;
-          inner=(isTarget?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div><div class="gcap">'+escapeHtml(g.name.toUpperCase())+'</div>':'<div class="gctl">●</div>');
+          inner=(isTarget?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div><div class="gcap">'+escapeHtml(g.name.toUpperCase())+'</div>':'<div class="gctl">+</div>');
           if(isTarget) inner+=vlink(g);
         }
       }else if(g&&g.link){
-        inner=(w===g.target?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div>':'<div class="gctl">●</div>');
+        inner=(w===g.target?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div>':'<div class="gctl">+</div>');
         if(w===g.target) inner+=vlink(g);
       }
       out.push('<div class="cell'+(pm&&w===pm.tw&&c===pm.c?' pick-t':'')+'" data-w="'+w+'" data-c="'+c+'">'+inner+'</div>');
@@ -782,22 +788,56 @@ function dragStart(e){ const t=e.target; e.dataTransfer.setData('text/plain',t.d
 function pendingPick(n,q,p){ pendingGate={n,q,p}; }
 
 /* ================= lab ================= */
-function pickTarget(t){target=t;['spinq','originq','braket'].forEach(x=>$('tg-'+x).classList.toggle('sel',x===t));if(lastResult)showIR(t,document.querySelector(`[data-ir="${t}"]`));}
+function pickTarget(t){target=t;['spinq','originq','braket','all'].forEach(x=>$('tg-'+x).classList.toggle('sel',x===t));if(lastResult&&t!=='all')showIR(t,document.querySelector(`[data-ir="${t}"]`));}
+let runHistory=[], runId=0;
+function pushHistory(d){
+  const r=d.result, top=Object.entries(r.counts).sort((a,b)=>b[1]-a[1]).slice(0,3)
+    .map(([k,v])=>'|'+k+'⟩:'+v).join(' ');
+  runHistory.unshift({id:++runId,t:new Date().toLocaleTimeString('zh-CN',{hour12:false}),target:r.backend,
+    shots:r.shots,counts:r.counts,explanation:d.explanation,transpilations:d.transpilations,top});
+  if(runHistory.length>20) runHistory.pop();
+  renderRunHistory();
+}
+function renderRunHistory(){
+  $('run-history').innerHTML=runHistory.map(h=>
+    '<div class="rh-item" onclick="restoreRun('+h.id+')" title="点击恢复查看">'+
+    '<code>'+escapeHtml(h.target)+'</code> <span class="muted">'+h.t+' · '+h.shots+' shots</span>'+
+    '<div class="muted" style="font-size:11px">'+escapeHtml(h.top)+'</div></div>').join('')||
+    '<span class="muted" style="font-size:12px">（暂无记录）</span>';
+}
+function restoreRun(id){
+  const h=runHistory.find(x=>x.id===id); if(!h) return;
+  const d={result:{counts:h.counts,backend:h.target,shots:h.shots,job_id:'history'},explanation:h.explanation,transpilations:h.transpilations};
+  lastResult=d;
+  renderHistogram(d);
+  $('res-backend').textContent=h.target;$('res-shots').textContent=h.shots;$('res-job').textContent='history';
+  $('res-expl').textContent=h.explanation;
+  $('ir-spinq').textContent=h.transpilations.spinq;$('ir-originq').textContent=h.transpilations.originq;$('ir-braket').textContent=h.transpilations.braket;
+  $('lab-result').style.display='block';$('lab-ir').style.display='block';
+  showIR('spinq',document.querySelector('[data-ir="spinq"]'));
+}
 async function runLab(){
   const qasm=$('qasm-editor').value.trim();
   const shots=Math.max(16,Math.min(100000,parseInt($('shots').value)||8192));
   if(!qasm){alert('请粘贴 QASM 或选择示例电路。');return;}
   circView(circMode);
   const btn=$('run-btn');btn.disabled=true;btn.textContent='运行中…';
+  const targets=target==='all'?['spinq','originq','braket']:[target];
   try{
-    const d=await api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qasm,target,shots})});
-    lastResult=d;
-    renderHistogram(d); circView(circMode);
-    $('res-backend').textContent=d.result.backend;$('res-shots').textContent=d.result.shots;$('res-job').textContent=d.result.job_id;
-    $('res-expl').textContent=d.explanation;
-    $('ir-spinq').textContent=d.transpilations.spinq;$('ir-originq').textContent=d.transpilations.originq;$('ir-braket').textContent=d.transpilations.braket;
+    let last=null;
+    for(const t of targets){
+      const d=await api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qasm,target:t,shots})});
+      last=d; pushHistory(d);
+    }
+    if(!last) return;
+    lastResult=last;
+    renderHistogram(last); circView(circMode);
+    $('res-backend').textContent=last.result.backend;$('res-shots').textContent=last.result.shots;$('res-job').textContent=last.result.job_id;
+    $('res-expl').textContent=last.explanation;
+    $('ir-spinq').textContent=last.transpilations.spinq;$('ir-originq').textContent=last.transpilations.originq;$('ir-braket').textContent=last.transpilations.braket;
     $('lab-result').style.display='block';$('lab-ir').style.display='block';
-    showIR(target,document.querySelector(`[data-ir="${target}"]`));
+    const showT=target==='all'?'spinq':target;
+    showIR(showT,document.querySelector(`[data-ir="${showT}"]`));
   }catch(err){
     alert('运行失败：'+err.message+'\n\n常见原因：门不在白名单 / 寄存器未声明或越界 / 语法错误');
   }finally{btn.disabled=false;btn.textContent='▶ 运行';}
