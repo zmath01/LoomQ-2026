@@ -140,13 +140,15 @@
   .gk-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
   .gk-card .gk-name{font-family:ui-monospace,monospace;font-size:14px;font-weight:700;color:var(--acc);margin-bottom:4px}
   .gk-card .gk-desc{font-size:13px;color:var(--ink);line-height:1.55}
-  .hist{display:flex;align-items:flex-end;gap:8px;height:160px;padding:10px 4px 0;border-bottom:1px solid var(--line)}
-  .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
-  .bar .rect{width:70%;background:linear-gradient(180deg,#1976D2,#1565C0);border-radius:4px 4px 0 0;transition:height .5s ease}
+  .hist{display:flex;align-items:flex-end;gap:6px;height:160px;padding:10px 4px 0;border-bottom:1px solid var(--line);overflow-x:auto}
+  .bar{flex:1 1 0;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+  .bar .rect{width:70%;max-width:42px;background:linear-gradient(180deg,#1976D2,#1565C0);border-radius:4px 4px 0 0;transition:height .5s ease}
   .bar.best .rect{background:linear-gradient(180deg,#0B1220,#1A2A4A)}
-  .bar .pct{font-size:11px;color:var(--sub);margin-bottom:4px;white-space:nowrap}
-  .bar .lbl{font-size:12px;margin-top:6px;font-family:ui-monospace,Consolas,monospace}
-  .bar.best .lbl{font-weight:800}
+  .bar.rest .rect{background:#C3CFE0}
+  .bar .lbl{font-size:11px;margin-top:4px;font-family:ui-monospace,Consolas,monospace;white-space:nowrap;color:var(--sub)}
+  .bar.best .lbl{font-weight:800;color:var(--ink)}
+  .hist-tip{position:fixed;background:#0B1220;color:#fff;font-size:12px;padding:4px 9px;border-radius:6px;
+    pointer-events:none;display:none;z-index:99;white-space:nowrap;font-family:ui-monospace,monospace}
   .legend{margin-top:8px;font-size:12px;color:var(--sub)}
   .legend .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin:0 6px 0 12px;vertical-align:-1px}
 
@@ -333,8 +335,9 @@
             <input id="shots" type="number" value="8192" min="16" max="100000" step="16" style="width:90px;border:1px solid var(--line);border-radius:8px;padding:7px 8px">
             <button class="btn" id="run-btn" onclick="runLab()">▶ 运行</button>
           </div>
-          <div class="muted" style="margin-bottom:4px">📊 直方图：</div>
+          <div class="muted" style="margin-bottom:4px">📊 直方图（悬停柱子看概率）：</div>
           <div id="hist-area"><span class="muted">（运行后显示）</span></div>
+          <div id="hist-tip"></div>
           <div id="lab-result" style="display:none">
             <div class="legend" style="margin-top:8px"><span class="dot" style="background:#1976D2"></span>结果
               <span class="dot" style="background:#0B1220"></span>主导态
@@ -850,14 +853,33 @@ function showIR(t,btn){
 }
 function renderHistogram(d){
   const counts=d.result.counts,total=Object.values(counts).reduce((a,b)=>a+b,0);
-  const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  let entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  const allCount=entries.length;
+  const maxKeys=8; // Qiskit number_to_keep standard: keep top-8, merge the rest
+  let rest=null;
+  if(allCount>maxKeys){
+    rest=entries.slice(maxKeys).reduce((s,[,v])=>s+v,0);
+    entries=entries.slice(0,maxKeys);
+  }
   const max=entries.length?entries[0][1]:1;
   const best=entries[0]&&entries[0][1]/total>0.25?entries[0][0]:null;
-  $('hist-area').innerHTML=`<div class="hist">${entries.slice(0,16).map(([k,v])=>{
-    const pct=(100*v/total).toFixed(1),hgt=Math.max(2,Math.round(140*v/max));
-    return `<div class="bar ${best&&k===best?'best':''}"><div class="pct">${pct}%</div><div class="rect" style="height:${hgt}px"></div><div class="lbl">|${k}⟩</div></div>`;
-  }).join('')||'<div class="muted">（无结果）</div>'}</div>
-  <div class="muted" style="margin-top:6px">共 ${total} 次采样 · 展示前 ${Math.min(16,entries.length)} 个结果</div>`;
+  const pct=v=>(100*v/total).toFixed(1);
+  const bar=(k,v,cls='')=>`<div class="bar ${best&&k===best?'best':''}${cls}" data-tip="|${k}⟩ · ${pct(v)}% · ${v} 次">`+
+    `<div class="rect" style="height:${Math.max(2,Math.round(140*v/max))}px"></div><div class="lbl">|${k}⟩</div></div>`;
+  let html='<div class="hist">'+entries.map(([k,v])=>bar(k,v)).join('');
+  if(rest!==null){
+    html+='<div class="bar rest" data-tip="其余 '+(allCount-maxKeys)+' 个位串合计 · '+pct(rest)+'% · '+rest+' 次">'+
+      '<div class="rect" style="height:'+Math.max(2,Math.round(140*rest/max))+'px"></div><div class="lbl">其余</div></div>';
+  }
+  html+='</div>';
+  html+='<div class="muted" style="margin-top:6px">共 '+total+' 次采样 · 悬停柱子看概率 · 前 '+Math.min(maxKeys,allCount)+(rest!==null?' + 其余':'')+'（Qiskit number_to_keep）</div>';
+  $('hist-area').innerHTML=html;
+  const tip=$('hist-tip');
+  document.querySelectorAll('#hist-area .bar').forEach(b=>{
+    b.addEventListener('mouseenter',()=>{tip.textContent=b.dataset.tip;tip.style.display='block';});
+    b.addEventListener('mousemove',e=>{tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-10)+'px';});
+    b.addEventListener('mouseleave',()=>{tip.style.display='none';});
+  });
 }
 
 /* ================= chat ================= */
