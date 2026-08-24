@@ -665,7 +665,7 @@ function gridToQasm(){
   const n=circ.qubits, lines=['OPENQASM 2.0;','include "qelib1.inc";','qreg q['+n+'];','creg c['+n+'];'];
   for(let c=0;c<circ.cols;c++) for(let w=0;w<n;w++){
     const g=circ.grid[w]&&circ.grid[w][c];
-    if(g&&g.name) lines.push(g.name+(g.param!=null?'('+fmtParam(g.param)+')':'')+' '+g.qubits.map(q=>'q['+q+']').join(', ')+';');
+    if(g&&g.name&&!g.link) lines.push(g.name+(g.param!=null?'('+fmtParam(g.param)+')':'')+' '+g.qubits.map(q=>'q['+q+']').join(', ')+';');
   }
   lines.push('measure q -> c;');
   return lines.join('\n')+'\n';
