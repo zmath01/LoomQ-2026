@@ -112,7 +112,19 @@
   .gchip{background:var(--acc-soft);border:1px solid var(--acc);border-radius:6px;padding:2px 7px;
     font-family:ui-monospace,monospace;font-size:12px;color:var(--acc);cursor:pointer;user-select:none;z-index:1;white-space:nowrap}
   .gchip:hover{background:#fff;box-shadow:0 0 0 2px var(--acc-soft)}
-  .gdot{width:10px;height:10px;border-radius:50%;background:#0B1220;z-index:1}
+  .gctl{width:12px;height:12px;border-radius:50%;background:#0B1220;z-index:1}
+  .gtgt{width:18px;height:18px;border:2px solid var(--acc);border-radius:50%;z-index:1;
+    display:flex;align-items:center;justify-content:center;color:var(--acc);font-size:14px;font-weight:700;line-height:1}
+  .gtgt.dim{opacity:.35}
+  .gcap{position:absolute;top:1px;right:2px;font-family:ui-monospace,monospace;font-size:9px;color:var(--acc);
+    z-index:1;background:#fff;padding:0 2px;border-radius:3px;border:1px solid var(--line)}
+  .vlink{position:absolute;left:calc(50% - 1px);width:2px;background:var(--acc);z-index:1}
+  .pick-hint{margin-bottom:8px;font-size:13px;background:var(--acc-soft);border:1px solid var(--acc);
+    border-radius:8px;padding:8px 12px;color:var(--acc)}
+  .pick-ctl{width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--acc);color:var(--acc);
+    font-weight:700;z-index:1;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
+  .pick-ctl.sel{background:var(--acc);color:#fff}
+  .cell.pick-t{background:var(--acc-soft)}
 
   /* ---------- circuit library knowledge ---------- */
   .bloch-wrap{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
@@ -594,7 +606,7 @@ const GATES12=[
   {n:'cx',label:'CX',q:2},{n:'cu1',label:'Cu1(θ)',q:2,p:1},
   {n:'swap',label:'SWAP',q:2},{n:'ccx',label:'CCX',q:3},
 ];
-let circMode='grid', pendingGate=null, circ={qubits:2,cols:1,grid:[[],[]]};
+let circMode='grid', pendingGate=null, pendingMulti=null, circ={qubits:2,cols:1,grid:[[],[]]};
 
 function parseParam(s){
   const t=(s||'').trim().replace(/\s+/g,'');
@@ -607,14 +619,23 @@ function parseParam(s){
 function fmtParam(p){
   if(p==null) return '';
   const k=p/Math.PI;
-  if(Math.abs(k-Math.round(k))<1e-9&&Math.abs(k)>1e-9) return Math.round(k)===1?'pi':(Math.round(k)+'*pi');
-  if(Math.abs(k*2-Math.round(k*2))<1e-9&&Math.abs(k)>1e-9) return Math.round(k*2)===1?'pi/2':(Math.round(k*2)+'*pi/2');
+  // Compact pi-fraction form: (k*pi/n), tried for n in 1,2,3,4,6,8,12.
+  for(const n of [1,2,3,4,6,8,12]){
+    const r=k*n;
+    if(Math.abs(r-Math.round(r))<1e-9&&Math.abs(r)>1e-9){
+      const m=Math.round(r);
+      return (Math.abs(m)===1?'':m+'*')+'pi'+(n>1?'/'+n:'');
+    }
+  }
   return String(Math.round(p*1e6)/1e6);
 }
 function placeGate(name,qubits,col,param){
+  // QASM order: controls first, target last (cx c,t). The target is always
+  // the wire the user dropped on; controls are user-picked wires.
+  const target=qubits[qubits.length-1];
   for(const q of qubits){
     while(circ.grid[q].length<=col) circ.grid[q].push(null);
-    circ.grid[q][col]=q===qubits[0]?{name,qubits,param}:{link:true,to:qubits[0]};
+    circ.grid[q][col]=q===qubits[0]?{name,qubits,param,target}:{link:true,to:qubits[0],name,target,qubits};
   }
   circ.cols=Math.max(circ.cols,col+1);
 }
@@ -645,17 +666,37 @@ function gridToQasm(){
 }
 function renderGrid(){
   const n=circ.qubits, cols=Math.max(circ.cols,1), out=[];
+  const pm=pendingMulti;
+  let hint='';
+  if(pm){
+    hint='<div class="pick-hint">目标固定在 q['+pm.tw+']（'+pm.name.toUpperCase()+'）· 请点击任意线上的 <b>●</b> 选择控制线（'+
+      (pm.q-1)+' 根，上下均可）· <b onclick="cancelPick()">取消</b></div>';
+  }
   for(let w=0;w<n;w++){
     out.push('<div class="qwire">q['+w+']</div>');
     for(let c=0;c<cols;c++){
       const g=circ.grid[w]&&circ.grid[w][c];
       let inner='';
-      if(g&&g.name) inner='<div class="gchip" data-w="'+w+'" data-c="'+c+'" title="点击删除">'+escapeHtml(g.name.toUpperCase()+(g.param!=null?'('+fmtParam(g.param)+')':''))+'</div>';
-      else if(g&&g.link) inner='<div class="gdot" title="目标比特"></div>';
-      out.push('<div class="cell" data-w="'+w+'" data-c="'+c+'">'+inner+'</div>');
+      if(pm&&w!==pm.tw&&c===pm.c&&!g){
+        inner='<div class="pick-ctl'+(pm.sel.includes(w)?' sel':'')+'" data-pick="'+w+'">●</div>';
+      }else if(pm&&w===pm.tw&&c===pm.c){
+        inner='<div class="gtgt dim">⊕</div>';
+      }else if(g&&g.name){
+        if(g.qubits.length===1){
+          inner='<div class="gchip" data-w="'+w+'" data-c="'+c+'" title="点击删除">'+escapeHtml(g.name.toUpperCase()+(g.param!=null?'('+fmtParam(g.param)+')':''))+'</div>';
+        }else{
+          const isTarget=w===g.target;
+          inner=(isTarget?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div><div class="gcap">'+escapeHtml(g.name.toUpperCase())+'</div>':'<div class="gctl">●</div>');
+          if(isTarget) inner+=vlink(g);
+        }
+      }else if(g&&g.link){
+        inner=(w===g.target?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div>':'<div class="gctl">●</div>');
+        if(w===g.target) inner+=vlink(g);
+      }
+      out.push('<div class="cell'+(pm&&w===pm.tw&&c===pm.c?' pick-t':'')+'" data-w="'+w+'" data-c="'+c+'">'+inner+'</div>');
     }
   }
-  $('circuit-svg').innerHTML='<div class="circ-grid" style="grid-template-columns:48px repeat('+cols+',60px)">'+out.join('')+'</div>';
+  $('circuit-svg').innerHTML=hint+'<div class="circ-grid" style="grid-template-columns:48px repeat('+cols+',60px)">'+out.join('')+'</div>';
   document.querySelectorAll('#circuit-svg .cell').forEach(cell=>{
     cell.addEventListener('dragover',e=>{e.preventDefault();cell.classList.add('drag-over');});
     cell.addEventListener('dragleave',()=>cell.classList.remove('drag-over'));
@@ -666,32 +707,57 @@ function renderGrid(){
       pendingGate=null;
       if(gn) placeFromPalette(gn,gq,gp,parseInt(cell.dataset.w,10),parseInt(cell.dataset.c,10));
     });
-    cell.addEventListener('click',()=>{ if(pendingGate){placeFromPalette(pendingGate.n,pendingGate.q,pendingGate.p,parseInt(cell.dataset.w,10),parseInt(cell.dataset.c,10));pendingGate=null;} });
-  });
-  document.querySelectorAll('#circuit-svg .gchip').forEach(chip=>{
-    chip.addEventListener('click',()=>{
-      const w=parseInt(chip.dataset.w,10),c=parseInt(chip.dataset.c,10),g=circ.grid[w][c];
-      if(!g||!g.name) return;
-      for(const q of g.qubits) circ.grid[q][c]=null;
-      syncToQasm();
+    cell.addEventListener('click',()=>{
+      const w=parseInt(cell.dataset.w,10),c=parseInt(cell.dataset.c,10);
+      if(pendingGate){ placeFromPalette(pendingGate.n,pendingGate.q,pendingGate.p,w,c); pendingGate=null; return; }
+      if(pendingMulti){
+        const pick=cell.querySelector('.pick-ctl');
+        if(pick) pickControl(parseInt(pick.dataset.pick,10)); else cancelPick();
+        return;
+      }
+      const g=circ.grid[w]&&circ.grid[w][c];
+      if(g&&(g.name||g.link)){
+        const gate=g.link?circ.grid[g.to]&&circ.grid[g.to][c]:g;
+        if(gate&&gate.name){ for(const q of gate.qubits) circ.grid[q][c]=null; syncToQasm(); }
+      }
     });
   });
 }
+function vlink(g){
+  const lo=Math.min(...g.qubits), hi=Math.max(...g.qubits), span=(hi-lo)*46;
+  if(span<=0) return '';
+  return '<div class="vlink" style="height:'+span+'px;'+(g.target===lo?'top:24px':'bottom:24px')+'"></div>';
+}
+function pickControl(w){
+  const pm=pendingMulti; if(!pm) return;
+  if(pm.sel.includes(w)){ pm.sel=pm.sel.filter(x=>x!==w); renderGrid(); return; }
+  pm.sel.push(w);
+  if(pm.sel.length>=pm.q-1){
+    placeGate(pm.name,[...pm.sel,pm.tw],pm.c,pm.param);
+    pendingMulti=null;
+    syncToQasm();
+  }else renderGrid();
+}
+function cancelPick(){ pendingMulti=null; renderGrid(); }
 function syncFromQasm(){ parseQasmToGrid(); if(circMode==='grid') renderGrid(); }
 function syncToQasm(){ $('qasm-editor').value=gridToQasm(); renderGrid(); }
 function placeFromPalette(n,q,p,w,c){
-  if(w+q>circ.qubits){
-    if(w+q>12){alert('最多 12 比特');return;}
-    circ.qubits=w+q;
-    while(circ.grid.length<circ.qubits) circ.grid.push([]);
+  if(q>1){
+    if(circ.qubits<q){ alert('至少需要 '+q+' 根线才能放 '+n.toUpperCase()+'（先用 + 加线，最多 12 根）'); return; }
+    while((circ.grid[w]&&circ.grid[w][c])) c++;
+    const param=p?(prompt('请输入角度（如 pi/2、0.7；留空默认 π/4）')||''):null;
+    const angle=parseParam(param);
+    // Control-picker: target stays on the dropped wire; the user picks the
+    // control wire(s) from any free wire above/below (max 12 wires).
+    pendingMulti={name:n,q,p,param:(angle==null&&p?Math.PI/4:angle),tw:w,c,sel:[]};
+    renderGrid();
+    return;
   }
-  if(q>1){ // multi-qubit: target wires must be free in the chosen column
-    for(let i=1;i<q;i++){ const g=circ.grid[w+i]&&circ.grid[w+i][c]; if(g){ alert('该列有冲突，请换一列'); return; } }
-  }
+  if(w>=circ.qubits) return;
   while((circ.grid[w]&&circ.grid[w][c])) c++;
   const param=p?(prompt('请输入角度（如 pi/2、0.7；留空默认 π/4）')||''):null;
   const angle=parseParam(param);
-  placeGate(n,Array.from({length:q},(_,i)=>w+i),c,angle==null&&p?Math.PI/4:angle);
+  placeGate(n,[w],c,angle==null&&p?Math.PI/4:angle);
   syncToQasm();
 }
 function clearGrid(){ circ={qubits:2,cols:1,grid:[[],[]]}; syncToQasm(); }
