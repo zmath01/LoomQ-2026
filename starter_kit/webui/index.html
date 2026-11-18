@@ -35,7 +35,7 @@
   .status-card{background:var(--chip);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--sub);margin-top:10px}
   .status-card b{color:var(--ink)}
   main{flex:1;padding:26px 34px 80px;min-width:0}
-  body{overflow-x:hidden}
+  body{overflow-wrap:break-word}
 
   /* ---------- common ---------- */
   h1{font-size:23px;margin:0 0 4px}
@@ -183,6 +183,27 @@
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
   th{color:var(--sub);font-weight:600;background:var(--chip)}
   code{background:var(--chip);padding:1px 6px;border-radius:5px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+
+  /* Responsive lab: retain readable controls and scroll only the circuit. */
+  .lab3>*{min-width:0}.lab-right{min-width:0}.card{min-width:0}
+  .cell{padding:0;background:transparent;min-width:0;overflow:visible;font:inherit}
+  button.cell:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .gctl{display:inline-block}.swap-mark{font-size:25px;line-height:1;color:var(--acc);z-index:2;background:#fff}
+  .vlink{pointer-events:none;z-index:0}
+  .measurement-link{position:absolute;left:calc(50% - 2px);width:4px;border-left:1px solid var(--acc);border-right:1px solid var(--acc);pointer-events:none;z-index:0}
+  .classical-cell::before{height:4px;background:transparent;border-top:1px solid var(--sub);border-bottom:1px solid var(--sub)}
+  .classical-index{z-index:2;background:#fff;font:12px ui-monospace,monospace}
+  .gchip,.gtgt,.gctl{z-index:2}.gtgt{background:#fff}
+  .circuit-note{max-width:100%;white-space:normal;font-size:12px}
+  #editor-status{white-space:normal}.error{color:#b42318}
+  #draw-justify{max-width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:white}
+  .table-scroll{overflow-x:auto;max-width:100%}.tabs{overflow-x:auto;max-width:100%}.tabs button{white-space:nowrap}
+  .row input,.row select{max-width:100%;min-width:0}.row code{overflow-wrap:anywhere}
+  nav{flex-shrink:0}.lab3 .circuit-wrap{max-width:100%}
+  @media(max-width:1279px){.lab3{grid-template-columns:minmax(0,1fr) 280px}.lab3>.card:first-child{grid-column:1/-1}.gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr))}.gatebtn{min-height:44px}}
+  @media(max-width:1000px){.lab3{grid-template-columns:minmax(0,1fr)}.lab-right{position:static}.lab3>.card:first-child{grid-column:auto}main{padding:20px}.lab3>.card:first-child>.row{display:inline-flex;margin-right:8px}}
+  @media(max-width:760px){nav{padding:6px;gap:4px;border-right:0;border-bottom:1px solid var(--line)}nav .item{flex:0 0 auto;margin:0;min-height:44px;white-space:nowrap}nav .hint,nav .status-card{display:none}main{padding:14px}.card{padding:14px}.hero{padding:18px}.bloch-side{min-width:0;flex-basis:100%}.chatinput{flex-wrap:wrap}.chatinput textarea{min-width:0;flex-basis:100%}.msg{max-width:96%}.btn{min-height:44px}.tabs button{min-height:44px}.gates{grid-template-columns:repeat(4,minmax(0,1fr))}details.agentcfg input{min-width:140px;max-width:100%;flex:1 1 160px!important}textarea,input{font-size:16px}#bloch-canvas{height:auto}table{min-width:600px}}
+  @media(max-width:380px){.gates{grid-template-columns:repeat(3,minmax(0,1fr))}.hero h1{font-size:21px}main{padding:10px}}
 </style>
 </head>
 <body>
@@ -208,6 +229,7 @@
 
   <!-- ================= MAIN ================= -->
   <main>
+    <p id="runtime-mode" class="muted" role="status"></p>
 
     <!-- ======== TAB: START ======== -->
     <section id="tab-start" class="panel on">
@@ -303,6 +325,7 @@
             <button class="btn ghost small" onclick="addWire()" title="增加一根电路线">+ 加线</button>
             <button class="btn ghost small" onclick="removeWire()" title="减少一根电路线（需该线无门）">− 减线</button>
           </div>
+          <button class="btn ghost small" style="margin-top:10px;width:100%" onclick="measureAll()">测量全部（q[i] → c[i]）</button>
           <button class="btn ghost small" style="margin-top:10px;width:100%" onclick="clearGrid()">🗑 清空电路</button>
           <div class="muted" style="margin-top:8px;font-size:11px">点击已放置的门可删除</div>
         </div>
@@ -317,7 +340,10 @@
               <span class="muted" style="margin-left:auto;font-size:11px">位串右侧为 c[0]（小端）</span>
             </div>
             <div class="circuit-wrap" id="circuit-svg" style="overflow-x:auto"><span class="muted">（加载电路后显示）</span></div>
-            <textarea id="qasm-editor" spellcheck="false" style="margin-top:10px"></textarea>
+            <p id="editor-status" class="muted" role="status" aria-live="polite"></p>
+            <label for="draw-justify" class="muted">绘图排版</label>
+            <select id="draw-justify" onchange="changeJustify()"><option value="left">紧凑排列（不改变电路）</option><option value="none">逐门排列（一门一列）</option></select>
+            <textarea aria-label="OpenQASM 电路代码" id="qasm-editor" spellcheck="false" style="margin-top:10px"></textarea>
             <div class="muted" style="margin-top:6px;font-size:11px">可直接编辑下方 OPENQASM 2.0，电路图同步对照</div>
           </div>
         </div>
@@ -420,7 +446,7 @@
     <section id="tab-backends" class="panel">
       <div class="card">
         <h2>🖥️ 后端能力表</h2>
-        <div style="overflow:auto"><table id="backend-table"></table></div>
+        <div class="table-scroll"><table id="backend-table"></table></div>
       </div>
     </section>
   </main>
@@ -428,6 +454,9 @@
 
 <!-- tour modal removed -->
 
+<script src="./editor-layout.js"></script>
+<script src="./browser-runtime.js"></script>
+<script src="./editor-ui.js"></script>
 <script>
 /* ================= state ================= */
 const PRESETS = {
@@ -441,42 +470,40 @@ const $=id=>document.getElementById(id);
 
 
 /* ================= nav ================= */
-document.querySelectorAll('nav .item').forEach(a=>a.addEventListener('click',e=>{
-  e.preventDefault();
-  document.querySelectorAll('nav .item').forEach(x=>x.classList.remove('on'));
-  a.classList.add('on');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
-  $('tab-'+a.dataset.tab).classList.add('on');
-}));
+document.querySelectorAll('nav .item').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();showTab(a.dataset.tab);}));
 function showTab(name){
+  if(location.hash!=='#'+name)location.hash=name;
   document.querySelectorAll('nav .item').forEach(x=>x.classList.toggle('on',x.dataset.tab===name));
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id==='tab-'+name));
 }
 
 /* ================= api ================= */
 async function api(path,opts){
+  if(window.LOOMQ_STATIC)return LoomQRuntime.request(path,opts);
   const res=await fetch(path,opts);
   const data=await res.json().catch(()=>({ok:false,error:'无法解析响应'}));
   if(!data.ok) throw new Error(data.error||('HTTP '+res.status));
   return data;
 }
 async function init(){
+  initPalette();renderAlgos();renderGateKnowledge();initBloch();renderRunHistory();
   try{
     const h=await api('/api/health');
-    $('st-llm').innerHTML='智能体：'+(h.llm_configured?'<b style="color:var(--ok)">已就绪</b>':'<b style="color:var(--warn)">未配置</b>（对话不可用）');
-    $('st-server').innerHTML='服务器：<b style="color:var(--ok)">已连接</b>';
-    $('llm-status').textContent=h.llm_configured?'✅ 已配置（LOOMQ_LLM_*） — 直接在下面发问即可。':'⚠ 未配置 — 在上面填入 Base URL、Model、API Key 并点保存（只存于服务端内存，重启需重新输入）。';
-    loadPreset('bell');
-    loadBackends(); renderAlgos(); renderGateKnowledge(); initPalette(); initBloch();
-    renderRunHistory();
-    const params=new URLSearchParams(location.search);
-    const autoRun=params.has('run');
-    if(autoRun){showTab('lab');const rk=params.get('run');if(PRESETS[rk])loadPreset(rk);else loadPreset('bell');if(!params.has('diag')&&!window.__LOOMQ_DIAG)setTimeout(runLab,400);}else if(location.hash&&['start','chat','lab','algos','backends'].includes(location.hash.slice(1))){
-      showTab(location.hash.slice(1));
+    $('st-llm').textContent=h.llm_configured?'智能体：已配置':'智能体：未配置';
+    $('st-server').textContent=h.browser?'运行：浏览器本地参考模拟':'服务器：已连接';
+    $('runtime-mode').textContent=h.browser?'浏览器本地参考模拟（非真机）；首次加载计算环境后即可编辑和运行。示例提供预生成的 Qiskit 标准图。':'本地 Python 服务：图形编辑和参考模拟可用；安装 Qiskit 后支持任意电路的实时标准图。';
+    $('llm-status').textContent=h.browser?'GitHub Pages 不托管模型服务；智能体对话请使用本地 Python 服务。':h.llm_configured?'模型服务已配置。':'尚未配置模型服务。';
+    if(h.browser){
+      document.querySelector('details.agentcfg').hidden=true;
+      $('chatinput').disabled=true;
+      $('run-btn').textContent='▶ 本地模拟';
     }
-  }catch(err){
-    $('st-server').innerHTML='服务器：<b style="color:var(--warn)">连接失败</b> — 先运行 <code>python3 loomq_web.py</code>';
-  }
+    await loadBackends();
+    const params=new URLSearchParams(location.search),key=params.get('run');
+    await loadPreset(PRESETS[key]?key:'bell');
+    if(params.has('run')){showTab('lab');if(!params.has('diag')&&!window.__LOOMQ_DIAG)await runLab();}
+    else if(['start','chat','lab','algos','backends'].includes(location.hash.slice(1)))showTab(location.hash.slice(1));
+  }catch(error){$('st-server').textContent='连接失败：'+error.message;$('runtime-mode').textContent='请检查服务或网络后重试；原始 QASM 不会被覆盖。';}
 }
 async function loadBackends(){
   try{
@@ -498,52 +525,46 @@ function renderAlgos(){
       <button class="btn small" onclick="loadAlgo('${k}')">加载 + 运行</button>
     </div>`;}).join('');
 }
-function loadAlgo(k){showTab('lab');$('preset').value=k;loadPreset(k);setTimeout(runLab,300);}
+async function loadAlgo(k){showTab('lab');await loadPreset(k);if(editorValid)await runLab();}
 
 /* ================= presets / circuit diagram ================= */
+let presetTicket=0;
 async function loadPreset(k){
-  curPreset=k; $('preset').value=k;
-  // If the server inlined the QASM (via ?run=<preset>), use it synchronously
-  // to avoid a race in headless screenshots.
-  if(window.__LOOMQ_PRESET&&window.__LOOMQ_PRESET.key===k){
-    $('qasm-editor').value=window.__LOOMQ_PRESET.qasm;
-    $('lab-result').style.display='none';$('lab-ir').style.display='none';
-    circView('grid');
-    return;
-  }
+  const ticket=++presetTicket;curPreset=k;$('preset').value=k;
   try{
-    const res=await fetch('/circuits/'+PRESETS[k].file);
-    $('qasm-editor').value=await res.text();
-    $('lab-result').style.display='none';$('lab-ir').style.display='none';
-    circView('grid');
-  }catch(err){$('qasm-editor').value='// 加载失败: '+err.message;}
+    let source;
+    if(window.__LOOMQ_PRESET?.key===k)source=window.__LOOMQ_PRESET.qasm;
+    else{const response=await fetch('./circuits/'+PRESETS[k].file);if(!response.ok)throw new Error('示例加载失败');source=await response.text();}
+    if(ticket!==presetTicket)return;
+    $('qasm-editor').value=source;
+    $('lab-result').style.display='none';$('lab-ir').style.display='none';$('hist-area').textContent='（运行后显示）';
+    await circView('grid');
+  }catch(error){editorNotice(error.message,true);}
 }
 $('preset').addEventListener('change',()=>loadPreset($('preset').value));
 let _qasmTimer=null;
-$('qasm-editor').addEventListener('input',()=>{curPreset=null;clearTimeout(_qasmTimer);_qasmTimer=setTimeout(syncFromQasm,300);});
+$('qasm-editor').addEventListener('input',()=>{
+  ++editorEpoch;++presetTicket;editorValid=false;curPreset=null;
+  $('lab-result').style.display='none';$('lab-ir').style.display='none';$('hist-area').textContent='（电路已修改，请重新运行）';
+  clearTimeout(_qasmTimer);_qasmTimer=setTimeout(syncFromQasm,300);
+});
 async function drawCircuitFromEditor(){
   const qasm=$('qasm-editor').value.trim();
   if(!qasm){$('circuit-svg').innerHTML='<span class="muted">（空）</span>';return;}
+  const requestedJustify=drawingJustify();
   try{
-    const d=await api('/api/circuit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qasm})});
+    const d=await api('/api/circuit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qasm,justify:drawingJustify()})});
+    if(circMode!=='qiskit'||qasm!==$('qasm-editor').value.trim()||requestedJustify!==drawingJustify())return;
     if(d.standard_text){
-      // Standard Qiskit text circuit diagram, rendered exactly like a
-      // markdown code block: monospace, no wrapping, horizontal scroll, and
-      // font auto-scaled so wide diagrams stay aligned and on-screen.
-      const lines=d.standard_text.split('\n');
-      const maxLen=Math.max(...lines.map(l=>l.length),0);
-      // char width ~0.6em in a monospace font; target ~700px container
-      const fit=Math.max(7,Math.min(13,Math.floor(660/maxLen)));
-      $('circuit-svg').innerHTML='<pre class="circuit-pre" style="font-size:'+fit+'px">'+escapeHtml(d.standard_text)+'</pre>'+
-        '<div class="muted" style="margin-top:6px;font-size:11px">电路图由 Qiskit <code>QuantumCircuit.draw("text")</code> 渲染（开源标准）</div>';
+      $('circuit-svg').innerHTML='<pre class="circuit-pre">'+escapeHtml(d.standard_text)+'</pre>'+ '<div class="muted">由 Qiskit QuantumCircuit.draw("text") 生成'+(window.LOOMQ_STATIC?'（与当前电路匹配的构建时标准图）':'')+'。左右滑动查看，不缩小字体。</div>';
     }else{
-      // qiskit not installed on the server: show the source instead of a
-      // hand-rolled diagram (keeps the drawing honest).
-      $('circuit-svg').innerHTML='<pre class="ir" style="margin:0">'+escapeHtml(qasm)+'</pre>'+
-        '<div class="muted" style="margin-top:6px;font-size:11px">服务器未安装 qiskit，暂以 QASM 源码展示；'+
-        '安装后自动渲染标准电路图（<code>uv pip install --python .venv310 qiskit</code>）</div>';
+      $('circuit-svg').innerHTML='<pre class="ir">'+escapeHtml(qasm)+'</pre><p class="muted">'+(window.LOOMQ_STATIC?'该自定义电路未包含预生成 Qiskit 图。实时标准图需本地 Python 服务安装 Qiskit；浏览器图形编辑及本地模拟仍可用。':'服务器未安装 Qiskit，或当前电路不受其加载器支持；此处显示 QASM 原文，不冒充标准图。')+'</p>';
+
     }
-  }catch(err){$('circuit-svg').innerHTML=`<span class="muted">解析失败：${err.message}</span>`;}
+  }catch(err){
+    if(circMode==='qiskit'&&qasm===$('qasm-editor').value.trim()&&requestedJustify===drawingJustify())
+      $('circuit-svg').innerHTML=`<span class="muted">解析失败：${escapeHtml(err.message)}</span>`;
+  }
 }
 
 /* ================= knowledge tooltips ================= */
@@ -557,7 +578,7 @@ const GATE_INFO={
   sdg: 'S†（S 门的逆）：抵消 S 留下的相位。',
   t:   'T 门（π/8 门）：给 |1⟩ 加 e^(iπ/4) 相位。',
   tdg: 'T†（T 门的逆）：抵消 T 留下的相位。',
-  rz:  'RZ(θ)：绕 Z 轴旋转 θ 弧度（保持 |0⟩，|1⟩→e^(iθ)|1⟩）。',
+  rz:  'RZ(θ)：diag(e^(-iθ/2), e^(iθ/2))，绕 Z 轴旋转 θ 弧度；并非逐项等于相位门 P(θ)。',
   ry:  'RY(θ)：绕 Y 轴旋转 θ 弧度。',
   cx:  'CNOT 门：控制=1 时翻转目标（双比特纠缠的基本积木）。',
   cu1: '受控相位门 Cu1(θ)：两个比特都=1 时给 |11⟩ 加 e^(iθ) 相位。',
@@ -565,10 +586,10 @@ const GATE_INFO={
   ccx: 'Toffoli 门：两个控制比特都=1 时翻转目标（通用 3 比特经典门）。',
 };
 const CIRCUIT_INFO={
-  bell:    {one:'两比特纠缠（最大纠缠态）',more:'H 门让 q0 进入叠加，CNOT 让 q0 控制 q1 翻转，产生 |00⟩+|11⟩ 纠缠对。'},
-  ghz3:   {one:'三比特纠缠（最大纠缠态）',more:'H + CNOT 链把 3 个比特纠缠到 |000⟩+|111⟩ 上，3 体 GHZ。'},
-  qft4:   {one:'4 比特量子傅里叶变换（末位无 swap）',more:'把基态 |0000⟩ 变成 |0000⟩+|0001⟩+...+|1111⟩ 均匀叠加（+受控相位）。'},
-  grover3: {one:'3 比特 Grover 搜索（1 次迭代）',more:'均匀叠加 → oracle（CCX）标记 |111⟩ → 扩散算子放大振幅 ≈ 击中 |111⟩。'},
+  bell:    {one:'两比特纠缠（最大纠缠态）',more:'H 门让 q0 进入叠加，CNOT 让 q0 控制 q1 翻转，产生 (|00⟩+|11⟩)/√2 纠缠对。'},
+  ghz3:   {one:'三比特纠缠（最大纠缠态）',more:'H + CNOT 链把 3 个比特制备为 (|000⟩+|111⟩)/√2，3 体 GHZ。'},
+  qft4:   {one:'4 比特量子傅里叶变换（含末尾位反转 SWAP）',more:'对 |k⟩ 输出 Σⱼ exp(2πijk/16)|j⟩/4；|0000⟩ 输入得到归一化均匀叠加。'},
+  grover3: {one:'2 个搜索比特 + 1 个辅助比特',more:'在 4 个候选中标记搜索态 |11⟩；CCX 相位反冲和一次扩散放大该态，辅助比特复位后仅测量 q[0]、q[1]。'},
 };
 function gateTip(n,p){ return (GATE_INFO[n]||n) + (p?`\n拖放时输入角度（如 pi/2、0.7；留空默认 π/4）。`:''); }
 function circuitTip(k){ const c=CIRCUIT_INFO[k]; return c?(c.one+(c.more?'\n\n'+c.more:'')):''; }
@@ -616,218 +637,13 @@ const GATES12=[
   {n:'cx',label:'CX',q:2},{n:'cu1',label:'Cu1(θ)',q:2,p:1},
   {n:'swap',label:'SWAP',q:2},{n:'ccx',label:'CCX',q:3},
 ];
-let circMode='grid', pendingGate=null, pendingMulti=null, circ={qubits:2,cols:1,grid:[[],[]]};
-
-function parseParam(s){
-  const t=(s||'').trim().replace(/\s+/g,'');
-  if(!t) return null;
-  const m=t.match(/^pi(?:\/(\d+))?$/);
-  if(m) return m[1]?Math.PI/parseInt(m[1],10):Math.PI;
-  const v=parseFloat(t);
-  return isNaN(v)?null:v;
-}
-function fmtParam(p){
-  if(p==null) return '';
-  const k=p/Math.PI;
-  // Compact pi-fraction form: (k*pi/n), tried for n in 1,2,3,4,6,8,12.
-  for(const n of [1,2,3,4,6,8,12]){
-    const r=k*n;
-    if(Math.abs(r-Math.round(r))<1e-9&&Math.abs(r)>1e-9){
-      const m=Math.round(r);
-      return (Math.abs(m)===1?'':m+'*')+'pi'+(n>1?'/'+n:'');
-    }
-  }
-  return String(Math.round(p*1e6)/1e6);
-}
-function placeGate(name,qubits,col,param){
-  // QASM order: controls first, target last (cx c,t). The target is always
-  // the wire the user dropped on; controls are user-picked wires.
-  const target=qubits[qubits.length-1];
-  for(const q of qubits){
-    while(circ.grid[q].length<=col) circ.grid[q].push(null);
-    circ.grid[q][col]=q===qubits[0]?{name,qubits,param,target}:{link:true,to:qubits[0],name,target,qubits};
-  }
-  circ.cols=Math.max(circ.cols,col+1);
-}
-function colBlocked(c){
-  // Wires a multi-qubit gate in column c passes THROUGH as an intermediate
-  // wire; another gate must never sit on those cells or the vertical
-  // connector would overlap it (the QFT h-vs-cu1 collision).
-  const blocked=new Set();
-  for(let w=0;w<circ.qubits;w++){
-    const g=circ.grid[w]&&circ.grid[w][c];
-    if(g&&g.name&&g.qubits&&g.qubits.length>1){
-      const lo=Math.min(...g.qubits), hi=Math.max(...g.qubits);
-      for(let x=lo;x<=hi;x++) if(!g.qubits.includes(x)) blocked.add(x);
-    }
-  }
-  return blocked;
-}
-function colSuitable(qs,c){
-  for(const w of qs){ if(circ.grid[w]&&circ.grid[w][c]) return false; }
-  const b=colBlocked(c);
-  for(const w of qs) if(b.has(w)) return false;
-  return true;
-}
-function parseQasmToGrid(){
-  const qm=$('qasm-editor').value.match(/qreg\s*q\[\s*(\d+)\s*\]/);
-  const n=Math.max(2,qm?parseInt(qm[1],10):2);
-  circ={qubits:n,cols:1,grid:Array.from({length:n},()=>[])};
-  const last=new Array(n).fill(-1);
-  const re=/^\s*(h|x|s|sdg|t|tdg|rz|ry|cx|cu1|swap|ccx)\s*(?:\(\s*([^)]*)\s*\))?\s*q\[\s*(\d+)\s*\]\s*(?:,\s*q\[\s*(\d+)\s*\])?\s*(?:,\s*q\[\s*(\d+)\s*\])?\s*;?\s*$/;
-  for(const line of $('qasm-editor').value.split('\n')){
-    const m=line.match(re); if(!m) continue;
-    const qs=[parseInt(m[3],10)]; if(m[4]!==undefined) qs.push(parseInt(m[4],10)); if(m[5]!==undefined) qs.push(parseInt(m[5],10));
-    if(Math.max(...qs)>=n) continue;
-    let col=Math.max(...qs.map(q=>last[q]))+1;
-    while(!colSuitable(qs,col)) col++;
-    placeGate(m[1],qs,col,parseParam(m[2]));
-    for(const q of qs) last[q]=col;
-  }
-  circ.cols=Math.max(1,...circ.grid.map(r=>r.length));
-}
-function gridToQasm(){
-  const n=circ.qubits, lines=['OPENQASM 2.0;','include "qelib1.inc";','qreg q['+n+'];','creg c['+n+'];'];
-  for(let c=0;c<circ.cols;c++) for(let w=0;w<n;w++){
-    const g=circ.grid[w]&&circ.grid[w][c];
-    if(g&&g.name&&!g.link) lines.push(g.name+(g.param!=null?'('+fmtParam(g.param)+')':'')+' '+g.qubits.map(q=>'q['+q+']').join(', ')+';');
-  }
-  lines.push('measure q -> c;');
-  return lines.join('\n')+'\n';
-}
-function renderGrid(){
-  const n=circ.qubits, cols=Math.max(circ.cols,1), out=[];
-  const pm=pendingMulti;
-  let hint='';
-  if(pm){
-    hint='<div class="pick-hint">目标固定在 q['+pm.tw+']（'+pm.name.toUpperCase()+'）· 请点击任意线上的 <b>●</b> 选择控制线（'+
-      (pm.q-1)+' 根，上下均可）· <b onclick="cancelPick()">取消</b></div>';
-  }
-  for(let w=0;w<n;w++){
-    out.push('<div class="qwire">q['+w+']</div>');
-    for(let c=0;c<cols;c++){
-      const g=circ.grid[w]&&circ.grid[w][c];
-      let inner='';
-      if(pm&&w!==pm.tw&&c===pm.c&&!g){
-        inner='<div class="pick-ctl'+(pm.sel.includes(w)?' sel':'')+'" data-pick="'+w+'">+</div>';
-      }else if(pm&&w===pm.tw&&c===pm.c){
-        inner='<div class="gtgt dim">⊕</div>';
-      }else if(g&&g.name){
-        if(g.qubits.length===1){
-          inner='<div class="gchip" data-w="'+w+'" data-c="'+c+'" title="点击删除">'+escapeHtml(g.name.toUpperCase()+(g.param!=null?'('+fmtParam(g.param)+')':''))+'</div>';
-        }else{
-          const isTarget=w===g.target;
-          inner=(isTarget?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div><div class="gcap">'+escapeHtml(g.name.toUpperCase())+'</div>':'<div class="gctl">+</div>');
-          if(isTarget) inner+=vlink(g);
-        }
-      }else if(g&&g.link){
-        inner=(w===g.target?'<div class="gtgt">'+(g.name==='swap'?'×':'⊕')+'</div>':'<div class="gctl">+</div>');
-        if(w===g.target) inner+=vlink(g);
-      }
-      out.push('<div class="cell'+(pm&&w===pm.tw&&c===pm.c?' pick-t':'')+'" data-w="'+w+'" data-c="'+c+'">'+inner+'</div>');
-    }
-  }
-  $('circuit-svg').innerHTML=hint+'<div class="circ-grid" style="grid-template-columns:48px repeat('+cols+',60px)">'+out.join('')+'</div>';
-  document.querySelectorAll('#circuit-svg .cell').forEach(cell=>{
-    cell.addEventListener('dragover',e=>{e.preventDefault();cell.classList.add('drag-over');});
-    cell.addEventListener('dragleave',()=>cell.classList.remove('drag-over'));
-    cell.addEventListener('drop',e=>{e.preventDefault();cell.classList.remove('drag-over');
-      const gn=e.dataTransfer.getData('text/plain')||(pendingGate?pendingGate.n:'');
-      const gq=parseInt(e.dataTransfer.getData('text/q')||(pendingGate?pendingGate.q:1)||1,10);
-      const gp=(e.dataTransfer.getData('text/p')||(pendingGate?pendingGate.p:0))==='1';
-      pendingGate=null;
-      if(gn) placeFromPalette(gn,gq,gp,parseInt(cell.dataset.w,10),parseInt(cell.dataset.c,10));
-    });
-    cell.addEventListener('click',()=>{
-      const w=parseInt(cell.dataset.w,10),c=parseInt(cell.dataset.c,10);
-      if(pendingGate){ placeFromPalette(pendingGate.n,pendingGate.q,pendingGate.p,w,c); pendingGate=null; return; }
-      if(pendingMulti){
-        const pick=cell.querySelector('.pick-ctl');
-        if(pick) pickControl(parseInt(pick.dataset.pick,10)); else cancelPick();
-        return;
-      }
-      const g=circ.grid[w]&&circ.grid[w][c];
-      if(g&&(g.name||g.link)){
-        const gate=g.link?circ.grid[g.to]&&circ.grid[g.to][c]:g;
-        if(gate&&gate.name){ for(const q of gate.qubits) circ.grid[q][c]=null; syncToQasm(); }
-      }
-    });
-  });
-}
-function vlink(g){
-  const lo=Math.min(...g.qubits), hi=Math.max(...g.qubits), t=g.target;
-  const up=(t-lo)*46, down=(hi-t)*46;
-  // The target may sit in the MIDDLE of the span (e.g. ccx q[0],q[2],q[1]);
-  // draw the connector as two segments (up + down) so it never overshoots.
-  let html='';
-  if(up>0) html+='<div class="vlink" style="height:'+up+'px;bottom:24px"></div>';
-  if(down>0) html+='<div class="vlink" style="height:'+down+'px;top:24px"></div>';
-  return html;
-}
-function pickControl(w){
-  const pm=pendingMulti; if(!pm) return;
-  if(pm.sel.includes(w)){ pm.sel=pm.sel.filter(x=>x!==w); renderGrid(); return; }
-  pm.sel.push(w);
-  if(pm.sel.length>=pm.q-1){
-    const qs=[...pm.sel,pm.tw];
-    while(!colSuitable(qs,pm.c)) pm.c++; // keep the connector from crossing other gates
-    placeGate(pm.name,qs,pm.c,pm.param);
-    pendingMulti=null;
-    syncToQasm();
-  }else renderGrid();
-}
-function cancelPick(){ pendingMulti=null; renderGrid(); }
-function syncFromQasm(){ parseQasmToGrid(); if(circMode==='grid') renderGrid(); }
-function syncToQasm(){ $('qasm-editor').value=gridToQasm(); renderGrid(); }
-function placeFromPalette(n,q,p,w,c){
-  if(q>1){
-    if(circ.qubits<q){ alert('至少需要 '+q+' 根线才能放 '+n.toUpperCase()+'（先用 + 加线，最多 12 根）'); return; }
-    while(!colSuitable([w],c)) c++; // drop cell must not be crossed by an existing gate
-    const param=p?(prompt('请输入角度（如 pi/2、0.7；留空默认 π/4）')||''):null;
-    const angle=parseParam(param);
-    // Control-picker: target stays on the dropped wire; the user picks the
-    // control wire(s) from any free wire above/below (max 12 wires).
-    pendingMulti={name:n,q,p,param:(angle==null&&p?Math.PI/4:angle),tw:w,c,sel:[]};
-    renderGrid();
-    return;
-  }
-  if(w>=circ.qubits) return;
-  while((circ.grid[w]&&circ.grid[w][c])||!colSuitable([w],c)) c++;
-  const param=p?(prompt('请输入角度（如 pi/2、0.7；留空默认 π/4）')||''):null;
-  const angle=parseParam(param);
-  placeGate(n,[w],c,angle==null&&p?Math.PI/4:angle);
-  syncToQasm();
-}
-function clearGrid(){ circ={qubits:2,cols:1,grid:[[],[]]}; syncToQasm(); }
-function addWire(){ if(circ.qubits>=12){alert('最多 12 比特');return;} circ.qubits++; circ.grid.push(new Array(circ.cols).fill(null)); syncToQasm(); }
-function removeWire(){ if(circ.qubits<=2){alert('至少 2 比特');return;} const last=circ.qubits-1; if(circ.grid[last]&&circ.grid[last].some(g=>g&&g.name)){alert('最后一根线上还有门，请先删除后再减线');return;} circ.qubits--; circ.grid.pop(); syncToQasm(); }
-function loadExample(k){ $('preset').value=k; loadPreset(k); }
-function circView(m){
-  circMode=m;
-  $('btn-grid').classList.toggle('on',m==='grid');
-  $('btn-qiskit').classList.toggle('on',m==='qiskit');
-  // Re-parse the editor into the grid model so a programmatically loaded
-  // preset (which does not fire the input event) shows immediately.
-  if(m==='grid') syncFromQasm(); else drawCircuitFromEditor();
-}
-function initPalette(){
-  $('gate-palette').innerHTML=GATES12.map(g=>{
-    const q=g.q||1;
-    return '<button class="gatebtn'+(g.p?' cfg':'')+'" draggable="true" data-g="'+g.n+'" data-q="'+q+'" data-p="'+(g.p?1:0)+'"'+
-      ' title="'+escapeHtml(gateTip(g.n,!!g.p))+'"'+
-      ' ondragstart="dragStart(event)" onclick="pendingPick(\''+g.n+'\','+q+','+(g.p?1:0)+')">'+g.label+'</button>';
-  }).join('');
-}
-function dragStart(e){ const t=e.target; e.dataTransfer.setData('text/plain',t.dataset.g); e.dataTransfer.setData('text/q',t.dataset.q||'1'); e.dataTransfer.setData('text/p',t.dataset.p||'0'); }
-function pendingPick(n,q,p){ pendingGate={n,q,p}; }
-
 /* ================= lab ================= */
 function pickTarget(t){target=t;['spinq','originq','braket','all'].forEach(x=>$('tg-'+x).classList.toggle('sel',x===t));if(lastResult&&t!=='all')showIR(t,document.querySelector(`[data-ir="${t}"]`));}
 let runHistory=[], runId=0;
-function pushHistory(d){
+function pushHistory(d,qasm,targetId){
   const r=d.result, top=Object.entries(r.counts).sort((a,b)=>b[1]-a[1]).slice(0,3)
     .map(([k,v])=>'|'+k+'⟩:'+v).join(' ');
-  runHistory.unshift({id:++runId,t:new Date().toLocaleTimeString('zh-CN',{hour12:false}),target:r.backend,
+  runHistory.unshift({qasm,targetId,id:++runId,t:new Date().toLocaleTimeString('zh-CN',{hour12:false}),target:r.backend,
     shots:r.shots,counts:r.counts,explanation:d.explanation,transpilations:d.transpilations,top});
   if(runHistory.length>20) runHistory.pop();
   renderRunHistory();
@@ -839,8 +655,9 @@ function renderRunHistory(){
     '<div class="muted" style="font-size:11px">'+escapeHtml(h.top)+'</div></div>').join('')||
     '<span class="muted" style="font-size:12px">（暂无记录）</span>';
 }
-function restoreRun(id){
+async function restoreRun(id){
   const h=runHistory.find(x=>x.id===id); if(!h) return;
+  $('qasm-editor').value=h.qasm;await circView('grid');pickTarget(h.targetId);
   const d={result:{counts:h.counts,backend:h.target,shots:h.shots,job_id:'history'},explanation:h.explanation,transpilations:h.transpilations};
   lastResult=d;
   renderHistogram(d);
@@ -852,20 +669,22 @@ function restoreRun(id){
 }
 async function runLab(){
   const qasm=$('qasm-editor').value.trim();
-  const shots=Math.max(16,Math.min(100000,parseInt($('shots').value)||8192));
+  const shots=Number($('shots').value);
+  if(!Number.isInteger(shots)||shots<16||shots>100000){alert('采样次数需为 16..100000 的整数。');return;}
   if(!qasm){alert('请粘贴 QASM 或选择示例电路。');return;}
-  circView(circMode);
+  await syncFromQasm();if(!editorValid||qasm!==$('qasm-editor').value.trim())return;
   const btn=$('run-btn');btn.disabled=true;btn.textContent='运行中…';
   const targets=target==='all'?['spinq','originq','braket']:[target];
   try{
     let last=null;
     for(const t of targets){
       const d=await api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qasm,target:t,shots})});
-      last=d; pushHistory(d);
+      last=d; pushHistory(d,qasm,t);
     }
     if(!last) return;
+    if(qasm!==$('qasm-editor').value.trim()){editorNotice('结果属于运行前的电路，已保存到运行记录；当前编辑未覆盖。');return;}
     lastResult=last;
-    renderHistogram(last); circView(circMode);
+    renderHistogram(last);
     $('res-backend').textContent=last.result.backend;$('res-shots').textContent=last.result.shots;$('res-job').textContent=last.result.job_id;
     $('res-expl').textContent=last.explanation;
     $('ir-spinq').textContent=last.transpilations.spinq;$('ir-originq').textContent=last.transpilations.originq;$('ir-braket').textContent=last.transpilations.braket;
@@ -874,7 +693,7 @@ async function runLab(){
     showIR(showT,document.querySelector(`[data-ir="${showT}"]`));
   }catch(err){
     alert('运行失败：'+err.message+'\n\n常见原因：门不在白名单 / 寄存器未声明或越界 / 语法错误');
-  }finally{btn.disabled=false;btn.textContent='▶ 运行';}
+  }finally{btn.disabled=false;btn.textContent=window.LOOMQ_STATIC?'▶ 本地模拟':'▶ 运行';}
 }
 function rerunOn(t){pickTarget(t);runLab();}
 function showIR(t,btn){
@@ -916,6 +735,7 @@ function renderHistogram(d){
 /* ================= chat ================= */
 function pushMsg(role,html){const box=$('chatbox'),d=document.createElement('div');d.className='msg '+role;d.innerHTML=html;box.appendChild(d);box.scrollTop=box.scrollHeight;}
 async function sendChat(text){
+  if(window.LOOMQ_STATIC){pushMsg('bot','GitHub Pages 不托管模型服务；请使用本地 Python 服务进行智能体对话。');return;}
   const prompt=(text||'').trim()||$('chatinput').value.trim();
   if(!prompt)return;
   $('chatinput').value='';
@@ -957,12 +777,12 @@ async function runChatQasm(){
   // Load the LLM-generated circuit into the lab editor, switch to the lab
   // tab, then run it with the currently selected backend/shot count.
   $('qasm-editor').value=lastChatQasm; curPreset=null;
-  circView(circMode);
+  await circView(circMode);
   showTab('lab');
-  setTimeout(runLab,250);
+  if(editorValid)await runLab();
 }
-function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function firstExperiment(){showTab('lab');$('preset').value='bell';loadPreset('bell');setTimeout(runLab,300);}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+async function firstExperiment(){showTab('lab');await loadPreset('bell');if(editorValid)await runLab();}
 window.addEventListener('hashchange',()=>{const t=location.hash.replace('#','');if(['start','chat','lab','algos','backends'].includes(t))showTab(t);});
 
 init();

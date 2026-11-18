@@ -66,26 +66,15 @@ def show_counts(counts, shots: int) -> None:
 
 
 def explain_counts(counts) -> str:
-    keys = sorted(counts)
+    total = sum(counts.values())
+    keys = sorted(key for key, count in counts.items() if count > 0)
+    if not total or not keys:
+        return "没有测量样本。"
     if len(keys) == 1:
-        return "结果完全确定：每次测量都得到 |%s⟩。" % keys[0]
-    if len(keys) == 2 and set("".join(keys)) == {"0", "1"}:
-        a, b = keys
-        # Entanglement needs multi-bit registers whose outcomes are perfectly
-        # anti-correlated bit strings (e.g. 00/11 or 000/111). A single qubit
-        # in superposition (0/1) is NOT entanglement.
-        if (
-            len(a) >= 2
-            and len(a) == len(b)
-            and set(a) == {"0"}
-            and set(b) == {"1"}
-        ):
-            return ("只出现 |%s⟩ 和 |%s⟩，且两者总是同时出现——这就是纠缠："
-                    "单个比特看是随机的，但比特之间永远保持一致。" % (a, b))
-        if len(a) == 1 and len(b) == 1:
-            return ("单比特叠加态：每次测量随机得到 |0⟩ 或 |1⟩，各约占一半概率。"
-                    "测量前它同时处于两者——这就是叠加原理。")
-    return "共观察到 %d 种不同的测量结果，上方的百分比就是每种结果出现的频率。" % len(keys)
+        return "本批 %d 次采样仅观察到 |%s⟩；有限样本不能保证其他结果的概率严格为零。" % (total, keys[0])
+    if len(keys) == 2 and len(keys[0]) >= 2 and set(keys[0]) == {"0"} and set(keys[1]) == {"1"}:
+        return "本批样本仅出现 |%s⟩ 与 |%s⟩，表现出测量相关性；仅凭该基下的直方图不能证明纠缠或相干叠加。" % tuple(keys)
+    return "本批采样观察到 %d 种结果；百分比是样本频率，并非精确概率，也不能单独证明相干叠加或纠缠。" % len(keys)
 
 
 def draw_circuit(circuit) -> str:

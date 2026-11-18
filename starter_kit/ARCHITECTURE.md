@@ -84,3 +84,13 @@
 或 OpenQASM 3 的存在。
 
 *AI 辅助声明：本项目代码由 AI 辅助编写，各模块工作原理如上所述，可供异步审查。*
+
+## Circuit editing and static hosting
+
+The editor uses `loomq_core/editor.py` as a transport over the existing QASM
+parser. `webui/editor-layout.js` only schedules drawing columns; it does not
+transpile, route or simulate circuits. The local server provides live Qiskit
+text drawings. On Pages, `browser-worker.js` runs the same Python core through
+Pyodide; `tools/build_pages.py` supplies real Qiskit drawings for shipped
+examples. See [the editor and Pages contract](EDITOR_AND_PAGES.md) for scientific
+conventions, supported inputs, deployment and validation.

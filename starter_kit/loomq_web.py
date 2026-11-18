@@ -142,6 +142,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         global _INDEX_CACHE
         path = urlparse(self.path).path
+        if path in ("/editor-layout.js", "/editor-ui.js", "/browser-runtime.js", "/browser-worker.js"):
+            with open(os.path.join(WEBUI_DIR, path[1:]), "rb") as handle:
+                body = handle.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path.startswith("/circuits/"):
             self._serve_circuit(path)
             return
@@ -204,6 +213,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         path = urlparse(self.path).path
+        if path == "/api/editor":
+            try:
+                from loomq_core.editor import editor_response
+
+                self._send_json(editor_response(body))
+            except (ValueError, TypeError, KeyError) as exc:
+                self._error(str(exc), 422)
+            return
         if path == "/api/run":
             self._api_run(body)
             return
@@ -268,10 +285,14 @@ class Handler(BaseHTTPRequestHandler):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     qc = QuantumCircuit.from_qasm_str(qasm)
-                    drawn = qc.draw(output="text")
+                    justify = body.get("justify", "left")
+                    if justify not in ("left", "none"):
+                        raise ValueError("unsupported drawing justification")
+                    drawn = qc.draw(output="text", justify=justify, fold=-1, cregbundle=False)
                     text = drawn if isinstance(drawn, str) else drawn.__str__()
                 payload["standard_text"] = text
                 payload["qiskit"] = True
+                payload["qiskit_version"] = qiskit.__version__
             except Exception:  # noqa: BLE001 - qiskit absent or unsupported QASM
                 payload["standard_text"] = None
                 payload["qiskit"] = False

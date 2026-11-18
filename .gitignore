@@ -45,3 +45,7 @@ aws-credentials
 # ---- Local runtime state (regenerated, not evidence) ----
 starter_kit/report.json
 *.local.json
+
+# Generated GitHub Pages site and cached browser runtime
+/site/
+/.pages-runtime-cache/
