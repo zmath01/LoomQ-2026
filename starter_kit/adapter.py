@@ -73,7 +73,7 @@ def run(qasm_str: str, target: str, shots: int) -> Dict[str, Any]:
     the reference simulator samples it -- identical semantics for all targets.
     """
     _check_target(target)
-    if not isinstance(shots, int) or shots <= 0:
+    if not isinstance(shots, int) or isinstance(shots, bool) or shots <= 0:
         raise ValueError("shots must be a positive integer")
 
     native_ir = transpile(qasm_str, target)

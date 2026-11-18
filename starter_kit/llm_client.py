@@ -9,6 +9,7 @@ language.
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.error
 import urllib.request
@@ -27,7 +28,7 @@ def _configuration() -> tuple[str, str, str, float, int]:
         max_output = int(os.environ.get("LOOMQ_LLM_MAX_OUTPUT_TOKENS", "4096"))
     except ValueError as exc:
         raise RuntimeError("invalid LoomQ L2 numeric environment variable") from exc
-    if timeout <= 0 or max_output <= 0:
+    if not math.isfinite(timeout) or timeout <= 0 or max_output <= 0:
         raise RuntimeError("LoomQ L2 timeout and output-token limit must be positive")
     return (
         os.environ["LOOMQ_LLM_BASE_URL"].rstrip("/"),

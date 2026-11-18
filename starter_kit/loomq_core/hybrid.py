@@ -9,7 +9,8 @@ Splits a Hybrid-QASM program into:
 Register mapping (fixed by the contest rules):
   r1..r9  -> x1..x9   (general purpose)
   c[k]    -> x(10+k)  (measurement bits injected by the evaluator)
-Scratch registers x28..x31 are used for expression evaluation.
+Scratch registers x27..x31 are reserved for expression evaluation; measurement
+bits c[0]..c[16] occupy x10..x26.
 
 The classical block grammar that is supported:
   stmt  := assign | if
@@ -28,7 +29,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
-from .qasm import _split_statements, parse_qasm2
+from .qasm import Circuit, parse_qasm2
 from .transpilers import _format_qasm2_gate
 
 
@@ -41,6 +42,7 @@ _CLASSICAL_RE = re.compile(r"classical\s*\{", re.IGNORECASE)
 
 def _extract_classical_block(text: str) -> Tuple[str, str]:
     """Return (qasm_part, classical_body). Braces may nest."""
+    text = "\n".join(line.split("//", 1)[0] for line in text.splitlines())
     match = _CLASSICAL_RE.search(text)
     if not match:
         return text, ""
@@ -60,46 +62,12 @@ def _extract_classical_block(text: str) -> Tuple[str, str]:
     return qasm_part, body
 
 
-def _normalize_quantum_ops(qasm_part: str) -> List[str]:
+def _normalize_quantum_ops(circuit: Circuit) -> List[str]:
     """Normalize the quantum part into an ordered list of operation strings."""
-    # Validate against the full QASM parser first.
-    circuit = parse_qasm2(qasm_part)
-    ops: List[str] = []
-    for stmt in _split_statements(qasm_part):
-        if stmt.upper().startswith("OPENQASM") or stmt.startswith("include"):
-            continue
-        if re.fullmatch(r"[qcr]reg\s+.*", stmt):
-            continue
-        m = re.fullmatch(
-            r"measure\s+([A-Za-z_]\w*)\[(\d+)\]\s*->\s*([A-Za-z_]\w*)\[(\d+)\]", stmt
-        )
-        if m:
-            ops.append("measure %s[%s] -> %s[%s];" % m.groups())
-            continue
-        m = re.fullmatch(
-            r"measure\s+([A-Za-z_]\w*)\s*->\s*([A-Za-z_]\w*)", stmt
-        )
-        if m:
-            # whole-register measure: expand to per-bit ops using the parsed IR
-            for qubit, clbit in sorted(circuit.measurements):
-                ops.append("measure q[%d] -> c[%d];" % (qubit, clbit))
-            continue
-        # gate statement: re-emit in canonical form
-        gate_match = re.fullmatch(
-            r"([A-Za-z][A-Za-z0-9]*)(?:\((.+)\))?\s+(.+)", stmt
-        )
-        if not gate_match:
-            raise ValueError("unparseable quantum statement: %r" % stmt)
-        name = gate_match.group(1).lower()
-        params = ""
-        if gate_match.group(2):
-            params = "(%s)" % ", ".join(
-                p.strip() for p in gate_match.group(2).split(",")
-            )
-        operands = ", ".join(
-            token.strip() for token in gate_match.group(3).split(",")
-        )
-        ops.append("%s%s %s;" % (name, params, operands))
+    # Use the validated IR for gates and measurements alike. Re-parsing source
+    # statements used to duplicate whole-register measurements and lose offsets.
+    ops = [_format_qasm2_gate(gate) for gate in circuit.gates]
+    ops.extend("measure q[%d] -> c[%d];" % pair for pair in circuit.measurements)
     return ops
 
 
@@ -153,7 +121,7 @@ Stmt = Union[Assign, If]
 _TOKEN_RE = re.compile(
     r"""
     (?P<num>\d+)
-    | (?P<cbit>c\[\d+\])
+    | (?P<cbit>c\s*\[\s*\d+\s*\])
     | (?P<reg>r[1-9]\b)
     | (?P<kw>if|else)\b
     | (?P<op>==|!=|\+|-|=)
@@ -179,9 +147,10 @@ def _tokenize(body: str) -> List[str]:
 
 
 class _Parser:
-    def __init__(self, tokens: List[str]):
+    def __init__(self, tokens: List[str], num_clbits: Optional[int] = None):
         self.tokens = tokens
         self.pos = 0
+        self.num_clbits = num_clbits
 
     def peek(self) -> Optional[str]:
         return self.tokens[self.pos] if self.pos < len(self.tokens) else None
@@ -246,15 +215,25 @@ class _Parser:
 
     def parse_operand(self) -> Expr:
         token = self.next()
+        sign = 1
+        while token in ("+", "-"):
+            if token == "-":
+                sign = -sign
+            token = self.next()
         if token.isdigit():
-            return Num(int(token))
-        m = re.fullmatch(r"c\[(\d+)\]", token)
+            return Num(sign * int(token))
+        m = re.fullmatch(r"c\s*\[\s*(\d+)\s*\]", token)
         if m:
-            return CBit(int(m.group(1)))
-        m = re.fullmatch(r"r([1-9])", token)
-        if m:
-            return Reg(int(m.group(1)))
-        raise ValueError("classical block: bad operand %r" % token)
+            index = int(m.group(1))
+            if index >= 17 or (self.num_clbits is not None and index >= self.num_clbits):
+                raise ValueError("classical bit index out of range (declared bits c[0]..c[16] only)")
+            operand: Expr = CBit(index)
+        else:
+            m = re.fullmatch(r"r([1-9])", token)
+            if not m:
+                raise ValueError("classical block: bad operand %r" % token)
+            operand = Reg(int(m.group(1)))
+        return operand if sign == 1 else BinOp("-", Num(0), operand)
 
 
 # ---------------------------------------------------------------------------
@@ -280,22 +259,28 @@ class _Codegen:
         self.lines.append(text)
 
     def gen_operand(self, node: Expr, rd: str, scratch_idx: int) -> None:
+        # The grammar produces left-associative sums. Evaluate that chain in
+        # order with one reusable temporary, rather than consuming a register
+        # for each term (which also broke comparisons after only three terms).
+        operations = []
+        while isinstance(node, BinOp):
+            operations.append((node.op, node.right))
+            node = node.left
         if isinstance(node, Num):
             self.emit("li %s, %d" % (rd, node.value))
         elif isinstance(node, Reg):
             self.emit("addi %s, x%d, 0" % (rd, node.index))
         elif isinstance(node, CBit):
             self.emit("addi %s, x%d, 0" % (rd, 10 + node.index))
-        elif isinstance(node, BinOp):
+        else:
+            raise AssertionError("unknown expression node")
+        for op, right in reversed(operations):
             scratch = _SCRATCH[scratch_idx]
             if scratch == rd:
                 raise AssertionError("scratch register collision")
-            self.gen_operand(node.left, rd, scratch_idx + 1)
-            self.gen_operand(node.right, scratch, scratch_idx + 1)
-            instr = "add" if node.op == "+" else "sub"
+            self.gen_operand(right, scratch, scratch_idx + 1)
+            instr = "add" if op == "+" else "sub"
             self.emit("%s %s, %s, %s" % (instr, rd, rd, scratch))
-        else:
-            raise AssertionError("unknown expression node")
 
     def gen_stmt(self, stmt: Stmt) -> None:
         if isinstance(stmt, Assign):
@@ -340,8 +325,12 @@ def compile_hybrid_qasm(hybrid_qasm_str: str) -> Tuple[List[str], str]:
     if not isinstance(hybrid_qasm_str, str) or not hybrid_qasm_str.strip():
         raise ValueError("empty Hybrid-QASM input")
     qasm_part, classical_body = _extract_classical_block(hybrid_qasm_str)
-    quantum_ops = _normalize_quantum_ops(qasm_part)
+    circuit = parse_qasm2(qasm_part)
+    quantum_ops = _normalize_quantum_ops(circuit)
     tokens = _tokenize(classical_body)
-    stmts = _Parser(tokens).parse_block()
+    parser = _Parser(tokens, circuit.num_clbits)
+    stmts = parser.parse_block()
+    if parser.peek() is not None:
+        raise ValueError("classical block: unexpected trailing tokens")
     assembly = _Codegen().gen(stmts)
     return quantum_ops, assembly

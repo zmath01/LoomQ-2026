@@ -217,7 +217,13 @@ def safe_extract_submission(
     with tarfile.open(archive, "r:*") as bundle:
         for member in bundle.getmembers():
             source_path = PurePosixPath(member.name)
-            if source_path.is_absolute() or ".." in source_path.parts or len(source_path.parts) < 2:
+            if source_path.is_absolute() or ".." in source_path.parts or not source_path.parts:
+                raise SubmissionError(f"归档路径不安全: {member.name}")
+            # GitHub tarballs include a single top-level directory entry before
+            # its contents. Accept that directory, but never a root-level file.
+            if len(source_path.parts) == 1:
+                if member.isdir():
+                    continue
                 raise SubmissionError(f"归档路径不安全: {member.name}")
             if member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
                 raise SubmissionError(f"归档包含不允许的文件类型: {member.name}")

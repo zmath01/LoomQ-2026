@@ -64,13 +64,16 @@ class Circuit:
 
 def _eval_param(expr: str) -> float:
     """Safely evaluate a QASM parameter expression (numbers, pi, + - * / ())."""
-    tree = ast.parse(expr.strip(), mode="eval")
+    try:
+        tree = ast.parse(expr.strip(), mode="eval")
+    except SyntaxError as exc:
+        raise ValueError("invalid parameter expression") from exc
 
     def _walk(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
             return _walk(node.body)
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, (int, float)):
+            if type(node.value) in (int, float):
                 return float(node.value)
             raise ValueError("unsupported constant in parameter expression")
         if isinstance(node, ast.Name):
@@ -99,7 +102,13 @@ def _eval_param(expr: str) -> float:
             raise ValueError("unsupported binary operator in parameter expression")
         raise ValueError("unsupported parameter expression")
 
-    return _walk(tree)
+    try:
+        value = _walk(tree)
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError("parameter must be a finite real number")
+        return float(value)
+    except (ArithmeticError, TypeError) as exc:
+        raise ValueError("parameter must be a finite real number") from exc
 
 
 def _split_statements(qasm: str) -> List[str]:
@@ -110,6 +119,8 @@ def _split_statements(qasm: str) -> List[str]:
         if line:
             lines.append(line)
     text = " ".join(lines)
+    if text and not text.endswith(";"):
+        raise ValueError("QASM statements must end with a semicolon")
     return [stmt.strip() for stmt in text.split(";") if stmt.strip()]
 
 
@@ -123,26 +134,30 @@ def parse_qasm2(qasm_str: str) -> Circuit:
     cregs: Dict[str, int] = {}
     gates: List[Gate] = []
     measurements: List[Tuple[int, int]] = []
-    # single default register assumption is enough for the contest dialect,
-    # but we still track register names explicitly.
+    # Flatten named registers into disjoint ranges in the shared IR.
     qubit_offset: Dict[str, int] = {}
     clbit_offset: Dict[str, int] = {}
     total_qubits = 0
     total_clbits = 0
 
     header_seen = False
-    for stmt in statements:
-        head = stmt.split(None, 1)[0] if stmt.split(None, 1) else stmt
-        if stmt.upper().startswith("OPENQASM"):
-            if "2.0" not in stmt:
-                raise ValueError("only OpenQASM 2.0 input is supported")
+    for position, stmt in enumerate(statements):
+        if stmt.startswith("OPENQASM"):
+            if position != 0 or not re.fullmatch(r"OPENQASM\s+2\.0", stmt):
+                raise ValueError("program must start with exactly one OPENQASM 2.0 header")
             header_seen = True
             continue
+        if not header_seen:
+            raise ValueError("missing OPENQASM 2.0 header")
         if stmt.startswith("include"):
+            if not re.fullmatch(r'include\s+"qelib1\.inc"', stmt):
+                raise ValueError("only qelib1.inc is supported")
             continue
         m = re.fullmatch(r"qreg\s+([A-Za-z_]\w*)\[(\d+)\]", stmt)
         if m:
             name, size = m.group(1), int(m.group(2))
+            if name in qregs or name in cregs or size <= 0:
+                raise ValueError("register names must be unique and sizes positive")
             qubit_offset[name] = total_qubits
             qregs[name] = size
             total_qubits += size
@@ -150,6 +165,8 @@ def parse_qasm2(qasm_str: str) -> Circuit:
         m = re.fullmatch(r"creg\s+([A-Za-z_]\w*)\[(\d+)\]", stmt)
         if m:
             name, size = m.group(1), int(m.group(2))
+            if name in qregs or name in cregs or size <= 0:
+                raise ValueError("register names must be unique and sizes positive")
             clbit_offset[name] = total_clbits
             cregs[name] = size
             total_clbits += size
@@ -168,6 +185,8 @@ def parse_qasm2(qasm_str: str) -> Circuit:
                 for i in range(qregs[qname]):
                     measurements.append((qubit_offset[qname] + i, clbit_offset[cname] + i))
             elif qidx is not None and cidx is not None:
+                if int(qidx) >= qregs[qname] or int(cidx) >= cregs[cname]:
+                    raise ValueError("measurement index out of range")
                 measurements.append(
                     (qubit_offset[qname] + int(qidx), clbit_offset[cname] + int(cidx))
                 )
@@ -180,6 +199,8 @@ def parse_qasm2(qasm_str: str) -> Circuit:
             stmt,
         )
         if m:
+            if measurements:
+                raise ValueError("only terminal measurements are supported; gates cannot follow measurement")
             name = m.group(1).lower()
             if name not in GATE_ARITY:
                 raise ValueError("gate outside the contest whitelist: %s" % name)
@@ -202,6 +223,8 @@ def parse_qasm2(qasm_str: str) -> Circuit:
                 operands.append(qubit_offset[reg] + idx)
             if len(operands) != GATE_ARITY[name]:
                 raise ValueError("gate %s expects %d operands" % (name, GATE_ARITY[name]))
+            if len(set(operands)) != len(operands):
+                raise ValueError("gate operands must be distinct qubits")
             if len(params) != GATE_NUM_PARAMS[name]:
                 raise ValueError("gate %s expects %d parameters" % (name, GATE_NUM_PARAMS[name]))
             gates.append(Gate(name=name, params=params, qubits=tuple(operands)))
@@ -228,11 +251,18 @@ def _split_top_level_commas(text: str) -> List[str]:
             depth += 1
         elif ch == ")":
             depth -= 1
+            if depth < 0:
+                raise ValueError("unbalanced parentheses in parameters")
         if ch == "," and depth == 0:
+            if not "".join(current).strip():
+                raise ValueError("empty parameter")
             parts.append("".join(current))
             current = []
         else:
             current.append(ch)
-    if current:
-        parts.append("".join(current))
-    return [part.strip() for part in parts if part.strip()]
+    if depth != 0:
+        raise ValueError("unbalanced parentheses in parameters")
+    if not "".join(current).strip():
+        raise ValueError("empty parameter")
+    parts.append("".join(current))
+    return [part.strip() for part in parts]

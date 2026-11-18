@@ -11,8 +11,10 @@ transpiler end to end.
 from __future__ import annotations
 
 import cmath
+import bisect
 import math
 import random
+from itertools import accumulate
 from typing import Dict, List, Tuple
 
 from .qasm import Circuit, Gate
@@ -149,20 +151,15 @@ def simulate_counts(
     The key's rightmost character is c[0] (Qiskit convention), as required by
     the contest's unified result schema.
     """
-    if shots <= 0:
-        raise ValueError("shots must be positive")
-    rng = rng or random.Random()
+    if not isinstance(shots, int) or isinstance(shots, bool) or shots <= 0:
+        raise ValueError("shots must be a positive integer")
+    if rng is None:
+        rng = random.Random()
     state = statevector(circuit)
     size = len(state)
-    probs = [abs(a) ** 2 for a in state]
-
     # Build cumulative distribution once, then draw `shots` samples.
-    cumulative: List[float] = []
-    acc = 0.0
-    for p in probs:
-        acc += p
-        cumulative.append(acc)
-    cumulative[-1] = 1.0  # guard against float drift
+    cumulative = list(accumulate(abs(a) ** 2 for a in state))
+    total = cumulative[-1]
 
     if circuit.measurements:
         measured = circuit.measurements
@@ -174,18 +171,22 @@ def simulate_counts(
         measured = [(k, k) for k in range(circuit.num_qubits)]
         num_clbits = max(circuit.num_clbits, circuit.num_qubits)
 
-    counts: Dict[str, int] = {}
-    import bisect
-
+    # Count basis outcomes first: map each distinct outcome to its classical
+    # key once, instead of allocating and projecting a bit list for every shot.
+    outcomes: Dict[int, int] = {}
     for _ in range(shots):
-        outcome = bisect.bisect_left(cumulative, rng.random())
-        if outcome >= size:
-            outcome = size - 1
-        bits = ["0"] * num_clbits
-        for qubit, clbit in measured:
-            if (outcome >> qubit) & 1:
-                # rightmost character is c[0]
-                bits[num_clbits - 1 - clbit] = "1"
-        key = "".join(bits)
-        counts[key] = counts.get(key, 0) + 1
+        # bisect_right skips zero-probability plateaus even when random() = 0.
+        # Scale by the actual norm to tolerate accumulated floating-point drift.
+        outcome = bisect.bisect_right(cumulative, rng.random() * total, hi=size - 1)
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+
+    # Last measurement wins, including overwriting a previous one with zero.
+    final_measurements = {clbit: qubit for qubit, clbit in measured}
+    counts: Dict[str, int] = {}
+    for outcome, count in outcomes.items():
+        classical = 0
+        for clbit, qubit in final_measurements.items():
+            classical |= ((outcome >> qubit) & 1) << clbit
+        key = format(classical, "0%db" % num_clbits)
+        counts[key] = counts.get(key, 0) + count
     return counts

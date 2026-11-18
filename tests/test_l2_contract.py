@@ -85,6 +85,18 @@ class PublicL2ContractTests(unittest.TestCase):
         self.assertEqual(CompatibleAPIHandler.request_payload["model"], "local-model")
         self.assertEqual(CompatibleAPIHandler.request_payload["temperature"], 0)
 
+    def test_nonfinite_timeouts_are_rejected_before_network_access(self):
+        environment = {
+            "LOOMQ_LLM_BASE_URL": "http://127.0.0.1:1",
+            "LOOMQ_LLM_API_KEY": "local-key",
+            "LOOMQ_LLM_MODEL": "local-model",
+        }
+        for timeout in ("nan", "inf", "-inf", "0", "-1"):
+            with self.subTest(timeout=timeout), mock.patch.dict(
+                os.environ, {**environment, "LOOMQ_LLM_TIMEOUT_SECONDS": timeout}, clear=True
+            ), self.assertRaisesRegex(RuntimeError, "must be positive"):
+                load_client()._configuration()
+
 
 if __name__ == "__main__":
     unittest.main()

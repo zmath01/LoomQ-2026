@@ -34,18 +34,25 @@ def emit_spinq(circuit: Circuit) -> str:
         "OPENQASM 2.0;",
         'include "qelib1.inc";',
         "qreg q[%d];" % circuit.num_qubits,
-        "creg c[%d];" % max(circuit.num_clbits, circuit.num_qubits),
+        "creg c[%d];" % _classical_width(circuit),
     ]
     for gate in circuit.gates:
         lines.append(_format_qasm2_gate(gate))
-    for qubit, clbit in _sorted_measurements(circuit):
+    for qubit, clbit in _measurements(circuit):
         lines.append("measure q[%d] -> c[%d];" % (qubit, clbit))
     return "\n".join(lines) + "\n"
 
 
-def _sorted_measurements(circuit: Circuit):
+def _classical_width(circuit: Circuit) -> int:
     if circuit.measurements:
-        return sorted(circuit.measurements)
+        return circuit.num_clbits
+    return max(circuit.num_clbits, circuit.num_qubits)
+
+
+def _measurements(circuit: Circuit):
+    if circuit.measurements:
+        # Assignment order matters when several qubits write the same bit.
+        return circuit.measurements
     return [(k, k) for k in range(circuit.num_qubits)]
 
 
@@ -73,7 +80,7 @@ def emit_braket(circuit: Circuit) -> str:
         "OPENQASM 3.0;",
         'include "stdgates.inc";',
         "qubit[%d] q;" % circuit.num_qubits,
-        "bit[%d] c;" % max(circuit.num_clbits, circuit.num_qubits),
+        "bit[%d] c;" % _classical_width(circuit),
     ]
     for gate in _lower_for_braket(circuit.gates):
         name = _BRAKET_GATE_NAMES[gate.name]
@@ -83,7 +90,7 @@ def emit_braket(circuit: Circuit) -> str:
             lines.append("%s(%s) %s;" % (name, params, operands))
         else:
             lines.append("%s %s;" % (name, operands))
-    for qubit, clbit in _sorted_measurements(circuit):
+    for qubit, clbit in _measurements(circuit):
         lines.append("c[%d] = measure q[%d];" % (clbit, qubit))
     return "\n".join(lines) + "\n"
 
@@ -126,7 +133,7 @@ _ORIGINQ_GATE_NAMES = {
 def emit_originq(circuit: Circuit) -> str:
     lines = [
         "QINIT %d" % circuit.num_qubits,
-        "CREG %d" % max(circuit.num_clbits, circuit.num_qubits),
+        "CREG %d" % _classical_width(circuit),
     ]
     for gate in circuit.gates:
         name = _ORIGINQ_GATE_NAMES[gate.name]
@@ -136,7 +143,7 @@ def emit_originq(circuit: Circuit) -> str:
             lines.append("%s(%s) %s" % (name, params, operands))
         else:
             lines.append("%s %s" % (name, operands))
-    for qubit, clbit in _sorted_measurements(circuit):
+    for qubit, clbit in _measurements(circuit):
         lines.append("MEASURE q[%d], c[%d]" % (qubit, clbit))
     return "\n".join(lines) + "\n"
 

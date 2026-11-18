@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Preserve classical register width and measurement assignment order across all
+  three backends; later measurements now overwrite earlier values, including zero.
+- Reject malformed QASM headers, declarations, measurement indices, repeated gate
+  operands, nonfinite parameters, and unsupported gates after measurement.
+- Speed up sampling by projecting distinct basis outcomes once; correct sampling
+  at zero-probability cumulative-distribution boundaries.
+- Compile long classical expressions with reusable scratch registers; handle
+  comments and signed operands, validate classical bit bounds and trailing tokens,
+  and normalize multi-register quantum operations without duplicate measurements.
+- Fix runtime web model configuration and validate JSON objects, field types,
+  integer shots, request content types, and invalid HTTP body lengths.
+- Reset quantum state when loading a RISC-V program and reject self-controlled CNOTs.
+- Reject nonfinite LLM timeouts and accept GitHub archive root directories during
+  submission collection without permitting root-level files or unsafe paths.
+- Add deterministic regressions and run the complete local validation suite in CI
+  on Python 3.10 and 3.14. See `../VALIDATION.md` for results and limitations.
+- Seed the circuit verifier's sampling to prevent intermittent CI failures and
+  calculate fidelity safely when unexpected output states occur.
 - Use the importable `starter_kit/` name for the submission root.
 - Add `__init__.py` so tests can use `from starter_kit import adapter` directly.
 

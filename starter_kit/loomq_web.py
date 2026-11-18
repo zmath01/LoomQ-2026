@@ -86,6 +86,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -94,7 +96,10 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > MAX_BODY:
             raise ValueError("request body too large or empty")
         raw = self.rfile.read(length)
-        return json.loads(raw.decode("utf-8"))
+        body = json.loads(raw.decode("utf-8"))
+        if not isinstance(body, dict):
+            raise ValueError("request body must be a JSON object")
+        return body
 
     def _error(self, message: str, status: int = 400) -> None:
         self._send_json({"ok": False, "error": message}, status)
@@ -143,7 +148,6 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._serve_index()
             return
-            return
         if path == "/api/health":
             self._send_json(
                 {
@@ -187,9 +191,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.headers.get_content_type() != "application/json":
+            self.close_connection = True
+            self._error("Content-Type must be application/json", 415)
+            return
         try:
             body = self._read_body()
         except Exception as exc:  # noqa: BLE001
+            # An invalid length can leave unread bytes in this HTTP/1.1 stream.
+            self.close_connection = True
             self._error("无法解析请求体：%s" % exc)
             return
 
@@ -212,16 +222,23 @@ class Handler(BaseHTTPRequestHandler):
         # Set the LLM env vars at runtime so the agent picks up the new key
         # on the very next call (llm_client reads env on each invocation).
         # Keys are never echoed back; only the configured status is returned.
-        base_url = (body.get("base_url") or "").strip()
-        api_key = (body.get("api_key") or "").strip()
-        model = (body.get("model") or "").strip()
+        values = [body.get(field, "") for field in ("base_url", "api_key", "model")]
+        if not all(isinstance(value, str) for value in values):
+            self._error("base_url, api_key and model must be strings")
+            return
+        base_url, api_key, model = (value.strip() for value in values)
+        if base_url:
+            parsed = urlparse(base_url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                self._error("base_url must be an HTTP or HTTPS URL")
+                return
         if base_url:
             os.environ["LOOMQ_LLM_BASE_URL"] = base_url
         if api_key:
             os.environ["LOOMQ_LLM_API_KEY"] = api_key
         if model:
             os.environ["LOOMQ_LLM_MODEL"] = model
-        self._send_json({"ok": True, "configured": _llm_configured()})
+        self._send_json({"ok": True, "configured": llm_configured()})
 
     def _api_circuit(self, body: Dict[str, Any]) -> None:
         """Render the circuit with the de-facto standard open-source tool:
@@ -273,6 +290,8 @@ class Handler(BaseHTTPRequestHandler):
             self._error("未知目标后端：%r" % target)
             return
         try:
+            if isinstance(shots, bool) or not isinstance(shots, (int, str)):
+                raise ValueError
             shots = int(shots)
             if not 1 <= shots <= MAX_SHOTS:
                 raise ValueError

@@ -15,6 +15,7 @@ from __future__ import annotations
 import cmath
 import math
 import os
+import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,14 +38,14 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 def fidelity(counts: dict, ideal: dict, shots: int) -> float:
     keys = set(ideal) | set(counts)
     term = sum(
-        (math.sqrt(counts.get(k, 0) / shots) - math.sqrt(ideal[k])) ** 2 for k in keys
+        (math.sqrt(counts.get(k, 0) / shots) - math.sqrt(ideal.get(k, 0.0))) ** 2 for k in keys
     )
     return 1.0 - math.sqrt(term) / math.sqrt(2.0)
 
 
 def verify_dominant(name: str, ideal: dict) -> None:
     circuit = parse_qasm2(open(os.path.join(CIRCUITS, name)).read())
-    counts = simulate_counts(circuit, 8192)
+    counts = simulate_counts(circuit, 8192, random.Random(42))
     fid = fidelity(counts, ideal, 8192)
     check(name, fid >= 0.99, "fidelity=%.4f" % fid)
 
@@ -81,7 +82,7 @@ def verify_qft4() -> None:
 
 def verify_grover3() -> None:
     circuit = parse_qasm2(open(os.path.join(CIRCUITS, "grover3.qasm")).read())
-    counts = simulate_counts(circuit, 8192)
+    counts = simulate_counts(circuit, 8192, random.Random(42))
     top = max(counts.items(), key=lambda kv: kv[1])
     check("grover3-P(11)", top[0] == "11" and counts.get("11", 0) / 8192 > 0.98,
           "top=%s p=%.3f" % (top[0], top[1] / 8192))
@@ -91,7 +92,7 @@ def verify_random(name: str) -> None:
     circuit = parse_qasm2(open(os.path.join(CIRCUITS, name)).read())
     state = statevector(circuit)
     norm = sum(abs(a) ** 2 for a in state)
-    counts = simulate_counts(circuit, 4096)
+    counts = simulate_counts(circuit, 4096, random.Random(42))
     total = sum(counts.values())
     check(name, abs(norm - 1.0) < 1e-9 and total == 4096,
           "norm=%.6f shots=%d states=%d" % (norm, total, len(counts)))

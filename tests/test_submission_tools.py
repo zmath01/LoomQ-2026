@@ -255,9 +255,32 @@ def make_tar(path: Path, members):
                 info.type = tarfile.SYMTYPE
                 info.linkname = data
                 bundle.addfile(info)
+            elif kind == "directory":
+                info.type = tarfile.DIRTYPE
+                bundle.addfile(info)
 
 
 class ArchiveSafetyTests(unittest.TestCase):
+    def test_accepts_github_tarball_root_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "source.tar.gz"
+            make_tar(archive, [
+                ("repo-sha/", "directory", ""),
+                ("repo-sha/starter_kit/", "directory", ""),
+                ("repo-sha/starter_kit/adapter.py", "file", "ok"),
+            ])
+            safe_extract_submission(archive, root / "out", "starter_kit", 10, 1000)
+            self.assertEqual((root / "out" / "adapter.py").read_text(), "ok")
+
+    def test_rejects_top_level_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "source.tar.gz"
+            make_tar(archive, [("root-file", "file", "bad")])
+            with self.assertRaises(SubmissionError):
+                safe_extract_submission(archive, root / "out", "starter_kit", 10, 1000)
+
     def test_extracts_only_starter_kit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

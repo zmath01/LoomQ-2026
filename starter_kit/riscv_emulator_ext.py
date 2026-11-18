@@ -41,6 +41,11 @@ class QuantumRISCVEmulator(TinyRISCVEmulator):
         self.qstate: List[complex] = []
         self.num_qubits = 0
 
+    def load_program(self, asm_code: str) -> None:
+        super().load_program(asm_code)
+        self.qstate = []
+        self.num_qubits = 0
+
     # -- quantum internals -------------------------------------------------
 
     def _require_qubit(self, index: int) -> None:
@@ -142,6 +147,8 @@ class QuantumRISCVEmulator(TinyRISCVEmulator):
                 control, target = self.get_register(args[0]), self.get_register(args[1])
                 self._require_qubit(control)
                 self._require_qubit(target)
+                if control == target:
+                    raise ValueError("qcx requires distinct control and target qubits")
                 cm, tm = 1 << control, 1 << target
                 for i in range(len(self.qstate)):
                     if (i & cm) and not (i & tm):
